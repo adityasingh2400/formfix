@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FormFix — Basketball Shot Analyzer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-deep: #080c14;
+      --bg-card: #0f1629;
+      --bg-card-hover: #151d33;
+      --border: #1e2a45;
+      --text-primary: #f1f5f9;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent: #f97316;
+      --accent-glow: rgba(249, 115, 22, 0.3);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --phase-load: #3b82f6;
+      --phase-set: #8b5cf6;
+      --phase-rise: #ec4899;
+      --phase-release: #f97316;
+      --phase-follow: #10b981;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    .app {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    /* Header */
+    header {
+      text-align: center;
+      margin-bottom: 32px;
+      padding: 40px 0;
+      background: linear-gradient(135deg, rgba(249,115,22,0.1) 0%, transparent 50%);
+      border-radius: 24px;
+      border: 1px solid var(--border);
+    }
+
+    .logo {
+      font-size: 2.5rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent) 0%, #fb923c 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 8px;
+    }
+
+    .tagline {
+      color: var(--text-secondary);
+      font-size: 1.1rem;
+      font-weight: 300;
+    }
+
+    /* Upload Section */
+    .upload-section {
+      background: var(--bg-card);
+      border: 2px dashed var(--border);
+      border-radius: 20px;
+      padding: 40px;
+      text-align: center;
+      margin-bottom: 32px;
+      transition: all 0.3s ease;
+      cursor: pointer;
+    }
+
+    .upload-section:hover, .upload-section.drag-over {
+      border-color: var(--accent);
+      background: var(--bg-card-hover);
+    }
+
+    .upload-icon {
+      font-size: 3rem;
+      margin-bottom: 16px;
+    }
+
+    .upload-text {
+      font-size: 1.1rem;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+    }
+
+    .upload-text strong {
+      color: var(--accent);
+    }
+
+    .upload-controls {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    input[type="file"] { display: none; }
+
+    select {
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+
+    select:hover { border-color: var(--accent); }
+
+    .btn {
+      background: linear-gradient(135deg, var(--accent) 0%, #ea580c 100%);
+      color: white;
+      border: none;
+      padding: 14px 32px;
+      border-radius: 12px;
+      font-family: inherit;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 20px var(--accent-glow);
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px var(--accent-glow);
+    }
+
+    .btn:disabled {
+      background: var(--text-muted);
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .btn-secondary {
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      box-shadow: none;
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--accent);
+      box-shadow: none;
+    }
+
+    /* Status */
+    .status {
+      text-align: center;
+      padding: 16px;
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+    }
+
+    .status.loading {
+      color: var(--accent);
+    }
+
+    .status.loading::after {
+      content: '';
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--accent);
+      border-top-color: transparent;
+      border-radius: 50%;
+      margin-left: 10px;
+      animation: spin 1s linear infinite;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Results Container */
+    .results { display: none; }
+    .results.visible { display: block; animation: fadeIn 0.5s ease; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Video Section */
+    .video-section {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      margin-bottom: 32px;
+    }
+
+    @media (max-width: 900px) {
+      .video-section { grid-template-columns: 1fr; }
+    }
+
+    .video-card {
+      background: var(--bg-card);
+      border-radius: 20px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .video-card-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .video-card-header h3 {
+      font-size: 1rem;
+      font-weight: 500;
+    }
+
+    .video-card-header .badge {
+      background: var(--accent);
+      color: white;
+      font-size: 0.7rem;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+
+    .video-wrapper {
+      aspect-ratio: 9/16;
+      max-height: 500px;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .video-wrapper video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    /* Section Headers */
+    .section {
+      margin-bottom: 32px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .section-header h2 {
+      font-size: 1.4rem;
+      font-weight: 600;
+    }
+
+    .section-header .count {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+
+    /* Phase Keyframes */
+    .keyframes-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+    }
+
+    .keyframe-card {
+      background: var(--bg-card);
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      transition: all 0.3s ease;
+    }
+
+    .keyframe-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--accent);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+    }
+
+    .keyframe-img {
+      aspect-ratio: 9/16;
+      max-height: 280px;
+      overflow: hidden;
+      background: #000;
+    }
+
+    .keyframe-img img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .keyframe-info {
+      padding: 14px;
+    }
+
+    .keyframe-phase {
+      font-weight: 600;
+      font-size: 0.95rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .keyframe-card[data-phase="load"] .keyframe-phase { color: var(--phase-load); }
+    .keyframe-card[data-phase="set"] .keyframe-phase { color: var(--phase-set); }
+    .keyframe-card[data-phase="rise"] .keyframe-phase { color: var(--phase-rise); }
+    .keyframe-card[data-phase="release"] .keyframe-phase { color: var(--phase-release); }
+    .keyframe-card[data-phase="follow_through"] .keyframe-phase { color: var(--phase-follow); }
+
+    /* Issues */
+    .issues-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+    }
+
+    .issue-card {
+      background: var(--bg-card);
+      border-radius: 16px;
+      padding: 20px;
+      border: 1px solid var(--border);
+      transition: all 0.3s ease;
+    }
+
+    .issue-card:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .issue-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .issue-severity {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-top: 6px;
+      flex-shrink: 0;
+    }
+
+    .issue-severity.high { background: var(--danger); box-shadow: 0 0 10px var(--danger); }
+    .issue-severity.medium { background: var(--warning); box-shadow: 0 0 10px var(--warning); }
+    .issue-severity.low { background: var(--success); box-shadow: 0 0 10px var(--success); }
+
+    .issue-title {
+      font-weight: 600;
+      font-size: 1.05rem;
+      line-height: 1.3;
+    }
+
+    .issue-fix {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      margin-bottom: 12px;
+      padding-left: 20px;
+    }
+
+    .issue-meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding-left: 20px;
+    }
+
+    .issue-tag {
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* Phase Metrics */
+    .phases-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .phase-card {
+      background: var(--bg-card);
+      border-radius: 16px;
+      padding: 20px;
+      border: 1px solid var(--border);
+      transition: all 0.3s ease;
+    }
+
+    .phase-card:hover {
+      background: var(--bg-card-hover);
+    }
+
+    .phase-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .phase-name {
+      font-weight: 600;
+      font-size: 1.1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .phase-card[data-phase="load"] .phase-name { color: var(--phase-load); }
+    .phase-card[data-phase="set"] .phase-name { color: var(--phase-set); }
+    .phase-card[data-phase="rise"] .phase-name { color: var(--phase-rise); }
+    .phase-card[data-phase="release"] .phase-name { color: var(--phase-release); }
+    .phase-card[data-phase="follow_through"] .phase-name { color: var(--phase-follow); }
+
+    .phase-duration {
+      background: var(--bg-deep);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+
+    .phase-metrics {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .metric-label {
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+    }
+
+    .metric-value {
+      font-weight: 600;
+      font-size: 1rem;
+    }
+
+    .metric-context {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .metric-bar {
+      height: 4px;
+      background: var(--bg-deep);
+      border-radius: 2px;
+      margin-top: 6px;
+      overflow: hidden;
+    }
+
+    .metric-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.5s ease;
+    }
+
+    .confidence-meter {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .confidence-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .confidence-bar {
+      flex: 1;
+      height: 6px;
+      background: var(--bg-deep);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .confidence-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--danger), var(--warning), var(--success));
+      border-radius: 3px;
+      transition: width 0.5s ease;
+    }
+
+    .confidence-value {
+      font-size: 0.85rem;
+      font-weight: 600;
+      min-width: 40px;
+      text-align: right;
+    }
+
+    /* Notes */
+    .notes-section {
+      background: linear-gradient(135deg, rgba(245,158,11,0.1) 0%, transparent 100%);
+      border: 1px solid rgba(245,158,11,0.3);
+      border-radius: 16px;
+      padding: 20px;
+      margin-top: 24px;
+    }
+
+    .notes-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      color: var(--warning);
+      font-weight: 600;
+    }
+
+    .notes-text {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+
+    .empty-state-icon {
+      font-size: 4rem;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="logo">FormFix</div>
+      <div class="tagline">AI-Powered Basketball Shot Analysis</div>
+    </header>
+
+    <div class="upload-section" id="uploadSection">
+      <div class="upload-icon">🏀</div>
+      <div class="upload-text">
+        <strong>Drop your video here</strong> or click to browse<br>
+        <span style="font-size: 0.9rem; color: var(--text-muted)">Best results: 3-6 second clip, side or front angle</span>
+      </div>
+      <div class="upload-controls">
+        <input type="file" id="fileInput" accept="video/*" />
+        <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">Choose File</button>
+        <select id="shotType">
+          <option value="">Any shot type</option>
+          <option value="free_throw">Free throw</option>
+          <option value="spot_up">Spot-up jumper</option>
+          <option value="pull_up">Pull-up jumper</option>
+        </select>
+        <button class="btn" id="analyzeBtn">Analyze Shot</button>
+      </div>
+      <div id="fileName" style="margin-top: 12px; color: var(--text-muted); font-size: 0.9rem;"></div>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <div class="results" id="results">
+      <!-- Video Comparison -->
+      <div class="video-section">
+        <div class="video-card">
+          <div class="video-card-header">
+            <h3>Original</h3>
+          </div>
+          <div class="video-wrapper">
+            <video id="origVideo" controls muted playsinline></video>
+          </div>
+        </div>
+        <div class="video-card" id="annotatedContainer" style="display: none;">
+          <div class="video-card-header">
+            <h3>Skeleton Overlay</h3>
+            <span class="badge">AI Tracked</span>
+          </div>
+          <div class="video-wrapper">
+            <video id="annotatedVideo" controls muted loop playsinline></video>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phase Keyframes -->
+      <div class="section">
+        <div class="section-header">
+          <h2>Shot Phases</h2>
+        </div>
+        <div class="keyframes-grid" id="keyframes"></div>
+    </div>
+
+      <!-- Issues -->
+      <div class="section" id="issuesSection" style="display: none;">
+        <div class="section-header">
+          <h2>Areas to Improve</h2>
+          <span class="count" id="issueCount">0 issues</span>
+        </div>
+        <div class="issues-grid" id="issues"></div>
+    </div>
+
+      <!-- Phase Metrics -->
+      <div class="section">
+        <div class="section-header">
+          <h2>Detailed Metrics</h2>
+        </div>
+        <div class="phases-grid" id="phasesGrid"></div>
+    </div>
+
+      <!-- Notes -->
+      <div class="notes-section" id="notesSection" style="display: none;">
+        <div class="notes-header">
+          <span>⚠️</span>
+          <span>Analysis Notes</span>
+        </div>
+        <div class="notes-text" id="confNotes"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const apiUrl = 'http://127.0.0.1:8000/analyze';
+    const fileInput = document.getElementById('fileInput');
+    const shotType = document.getElementById('shotType');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const statusEl = document.getElementById('status');
+    const resultsEl = document.getElementById('results');
+    const origVideo = document.getElementById('origVideo');
+    const annotatedVideo = document.getElementById('annotatedVideo');
+    const annotatedContainer = document.getElementById('annotatedContainer');
+    const issuesEl = document.getElementById('issues');
+    const issuesSection = document.getElementById('issuesSection');
+    const issueCount = document.getElementById('issueCount');
+    const confNotesEl = document.getElementById('confNotes');
+    const notesSection = document.getElementById('notesSection');
+    const phasesGrid = document.getElementById('phasesGrid');
+    const keyframesEl = document.getElementById('keyframes');
+    const uploadSection = document.getElementById('uploadSection');
+    const fileNameEl = document.getElementById('fileName');
+
+    // Angle descriptions for context
+    const angleInfo = {
+      knee_flexion: { label: 'Knee Bend', unit: '°', ideal: '90-110°', desc: 'Deeper bend = more power', goodRange: [90, 110] },
+      hip_flexion: { label: 'Hip Hinge', unit: '°', ideal: '150-170°', desc: 'How upright your torso is', goodRange: [150, 170] },
+      elbow_angle: { label: 'Elbow Angle', unit: '°', ideal: '80-100°', desc: 'Shooting arm bend', goodRange: [80, 100] },
+      shoulder_angle: { label: 'Shoulder Lift', unit: '°', ideal: '80-110°', desc: 'Arm elevation', goodRange: [80, 110] },
+      wrist_height: { label: 'Wrist Height', unit: '', ideal: '> 1.0', desc: 'Release point (body-relative)', goodRange: [1.0, 2.0] },
+      wrist_flexion: { label: 'Wrist Snap', unit: '°', ideal: '> 30°', desc: 'Follow-through flick', goodRange: [30, 90] },
+      wrist_flexion_vel_peak: { label: 'Snap Speed', unit: '°/s', ideal: '> 100°/s', desc: 'Wrist snap velocity', goodRange: [100, 300] },
+      index_pip_angle: { label: 'Finger Extension', unit: '°', ideal: '> 150°', desc: 'Finger roll-through', goodRange: [150, 180] },
+    };
+
+    const phaseDescriptions = {
+      load: 'Gather power in your legs',
+      set: 'Ball positioned at set point',
+      rise: 'Extending upward',
+      release: 'Ball leaves your hand',
+      follow_through: 'Finishing the motion'
+    };
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length) {
+        fileNameEl.textContent = `Selected: ${fileInput.files[0].name}`;
+      }
+    });
+
+    uploadSection.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadSection.classList.add('drag-over');
+    });
+
+    uploadSection.addEventListener('dragleave', () => {
+      uploadSection.classList.remove('drag-over');
+    });
+
+    uploadSection.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadSection.classList.remove('drag-over');
+      if (e.dataTransfer.files.length) {
+        fileInput.files = e.dataTransfer.files;
+        fileNameEl.textContent = `Selected: ${e.dataTransfer.files[0].name}`;
+      }
+    });
+
+    analyzeBtn.onclick = async () => {
+      if (!fileInput.files.length) {
+        statusEl.textContent = 'Please select a video first';
+        return;
+      }
+      const file = fileInput.files[0];
+      origVideo.src = URL.createObjectURL(file);
+      statusEl.textContent = 'Analyzing your shot...';
+      statusEl.classList.add('loading');
+      analyzeBtn.disabled = true;
+      resultsEl.classList.remove('visible');
+
+      const form = new FormData();
+      form.append('file', file, file.name);
+      if (shotType.value) form.append('shot_type', shotType.value);
+      form.append('return_visuals', 'true');
+
+      try {
+        const res = await fetch(apiUrl, { method: 'POST', body: form });
+        if (!res.ok) {
+          const txt = await res.text();
+          throw new Error(txt || res.statusText);
+        }
+        const data = await res.json();
+        renderResult(data.result);
+        statusEl.textContent = '';
+        statusEl.classList.remove('loading');
+        resultsEl.classList.add('visible');
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = 'Error: ' + err.message;
+        statusEl.classList.remove('loading');
+      } finally {
+        analyzeBtn.disabled = false;
+      }
+    };
+
+    function renderResult(result) {
+      // Annotated video
+      if (result.annotated_video_b64) {
+        annotatedVideo.src = result.annotated_video_b64;
+        annotatedContainer.style.display = 'block';
+      } else {
+        annotatedContainer.style.display = 'none';
+      }
+
+      // Keyframes
+      keyframesEl.innerHTML = '';
+      (result.keyframes || []).forEach(kf => {
+        const card = document.createElement('div');
+        card.className = 'keyframe-card';
+        card.dataset.phase = kf.phase;
+        card.innerHTML = `
+          <div class="keyframe-img"><img src="${kf.image_b64}" alt="${kf.phase}"></div>
+          <div class="keyframe-info">
+            <div class="keyframe-phase">${formatPhase(kf.phase)}</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">
+              ${phaseDescriptions[kf.phase] || ''}
+            </div>
+          </div>
+        `;
+        keyframesEl.appendChild(card);
+      });
+
+      // Issues
+      issuesEl.innerHTML = '';
+      const issues = result.issues || [];
+      if (issues.length > 0) {
+        issuesSection.style.display = 'block';
+        issueCount.textContent = `${issues.length} issue${issues.length > 1 ? 's' : ''} found`;
+        issues.forEach(issue => {
+          const card = document.createElement('div');
+          card.className = 'issue-card';
+          card.innerHTML = `
+            <div class="issue-header">
+              <div class="issue-severity ${issue.severity}"></div>
+              <div class="issue-title">${issue.name}</div>
+            </div>
+            <div class="issue-fix">${issue.delta || ''}</div>
+            <div class="issue-meta">
+              <span class="issue-tag">${formatPhase(issue.phase) || 'General'}</span>
+              <span class="issue-tag">${(issue.confidence * 100).toFixed(0)}% confident</span>
+            </div>
+          `;
+          issuesEl.appendChild(card);
+        });
+      } else {
+        issuesSection.style.display = 'none';
+      }
+
+      // Confidence notes
+      const notes = result.confidence_notes || [];
+      if (notes.length > 0) {
+        notesSection.style.display = 'block';
+        confNotesEl.textContent = notes.join(' • ');
+      } else {
+        notesSection.style.display = 'none';
+      }
+
+      // Phase metrics
+      phasesGrid.innerHTML = '';
+      (result.phases || []).forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'phase-card';
+        card.dataset.phase = p.name;
+
+        let metricsHtml = '';
+        const angles = p.angles || {};
+        Object.entries(angles).forEach(([key, val]) => {
+          if (val === null || val === undefined) return;
+          const info = angleInfo[key] || { label: key.replace(/_/g, ' '), unit: '', desc: '' };
+          const displayVal = typeof val === 'number' ? val.toFixed(1) : val;
+          
+          // Calculate how "good" this value is
+          let barColor = 'var(--text-muted)';
+          let barWidth = 50;
+          if (info.goodRange) {
+            const [min, max] = info.goodRange;
+            if (val >= min && val <= max) {
+              barColor = 'var(--success)';
+              barWidth = 80;
+            } else if (val < min) {
+              barWidth = Math.max(20, (val / min) * 60);
+              barColor = val < min * 0.7 ? 'var(--danger)' : 'var(--warning)';
+            } else {
+              barWidth = Math.min(100, 60 + ((val - max) / max) * 40);
+              barColor = 'var(--warning)';
+            }
+          }
+
+          metricsHtml += `
+            <div class="metric-row">
+              <div>
+                <div class="metric-label">${info.label}</div>
+                <div class="metric-context">${info.desc}</div>
+              </div>
+              <div class="metric-value">${displayVal}${info.unit}</div>
+            </div>
+            <div class="metric-bar">
+              <div class="metric-bar-fill" style="width: ${barWidth}%; background: ${barColor};"></div>
+            </div>
+          `;
+        });
+
+        const duration = p.timings?.duration ?? 0;
+        const confidence = p.confidence ?? 0;
+
+        card.innerHTML = `
+          <div class="phase-card-header">
+            <div class="phase-name">${formatPhase(p.name)}</div>
+            <div class="phase-duration">${duration.toFixed(2)}s</div>
+          </div>
+          <div class="phase-metrics">
+            ${metricsHtml || '<div style="color: var(--text-muted); font-size: 0.9rem;">No metrics available</div>'}
+          </div>
+          <div class="confidence-meter">
+            <span class="confidence-label">Tracking</span>
+            <div class="confidence-bar">
+              <div class="confidence-fill" style="width: ${confidence * 100}%;"></div>
+            </div>
+            <span class="confidence-value">${(confidence * 100).toFixed(0)}%</span>
+          </div>
+        `;
+        phasesGrid.appendChild(card);
+      });
+    }
+
+    function formatPhase(phase) {
+      if (!phase) return '';
+      return phase.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+  </script>
+</body>
+</html>
