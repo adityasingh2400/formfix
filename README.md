@@ -15,7 +15,25 @@ AI-powered basketball shot form analyzer. Upload a video of your shot and get in
 
 ## Quick Start
 
-### Requirements
+### Easy Way (Recommended)
+
+**Backend:**
+```bash
+cd formfix
+./start.sh
+```
+
+**Frontend (in another terminal):**
+```bash
+cd formfix  
+./start-frontend.sh
+```
+
+Then open **http://localhost:3000** and upload a video!
+
+### Manual Setup
+
+#### Requirements
 
 - **Python 3.10–3.12** (not 3.13 — MediaPipe doesn't support it yet)
 - **ffmpeg** (for video encoding)
@@ -27,7 +45,7 @@ AI-powered basketball shot form analyzer. Upload a video of your shot and get in
   sudo apt install ffmpeg
   ```
 
-### Backend
+#### Backend
 
 ```bash
 cd formfix
@@ -37,14 +55,12 @@ pip install -r backend/requirements.txt
 python -m uvicorn backend.src.main:app --reload --port 8000
 ```
 
-### Frontend
+#### Frontend
 
 ```bash
 cd frontend
 python3 -m http.server 3000
 ```
-
-Then open **http://localhost:3000** and upload a video!
 
 ## Project Structure
 
