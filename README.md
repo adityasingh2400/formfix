@@ -17,16 +17,16 @@ AI-powered basketball shot form analyzer. Upload a video of your shot and get in
 
 ### Easy Way (Recommended)
 
-**Backend:**
+**Backend (Terminal 1):**
 ```bash
-cd formfix
-./start.sh
+cd formfix/backend
+./back.sh
 ```
 
-**Frontend (in another terminal):**
+**Frontend (Terminal 2):**
 ```bash
-cd formfix  
-./start-frontend.sh
+cd formfix/frontend
+./front.sh
 ```
 
 Then open **http://localhost:3000** and upload a video!

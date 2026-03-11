@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # FormFix Frontend Startup Script
-# This script starts the frontend development server
+# Run this from the frontend/ directory: ./front.sh
 
 set -e  # Exit on any error
 
@@ -21,9 +21,15 @@ print_info() {
     echo -e "${BLUE}ℹ${NC} $1"
 }
 
-# Check if we're in the right directory
-if [[ ! -f "frontend/index.html" ]]; then
-    echo "Please run this script from the formfix root directory (where frontend/ folder is)"
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Change to the frontend directory (where this script lives)
+cd "$SCRIPT_DIR"
+
+# Verify index.html exists
+if [[ ! -f "index.html" ]]; then
+    echo "Could not find index.html. Make sure you're running from the frontend directory."
     exit 1
 fi
 
@@ -44,4 +50,4 @@ echo "================================"
 echo ""
 
 # Start the frontend server
-cd frontend && python3 -m http.server $PORT
+python3 -m http.server $PORT

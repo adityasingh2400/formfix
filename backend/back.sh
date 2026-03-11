@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # FormFix Backend Startup Script
-# This script sets up the virtual environment and starts the FastAPI server
+# Run this from the backend/ directory: ./back.sh
 
 set -e  # Exit on any error
 
@@ -32,6 +32,15 @@ print_info() {
     echo -e "${BLUE}ℹ${NC} $1"
 }
 
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Change to project root for venv and running uvicorn
+cd "$PROJECT_ROOT"
+
+print_info "Project root: $PROJECT_ROOT"
+
 # Check if Python 3.11 is available
 if ! command -v python3.11 &> /dev/null; then
     if ! command -v python3 &> /dev/null; then
@@ -47,9 +56,9 @@ fi
 
 print_info "Using Python: $PYTHON_CMD"
 
-# Check if we're in the right directory
+# Verify we're in the right place
 if [[ ! -f "backend/requirements.txt" ]]; then
-    print_error "Please run this script from the formfix root directory (where backend/ folder is)"
+    print_error "Could not find backend/requirements.txt. Something is wrong with the directory structure."
     exit 1
 fi
 
@@ -75,8 +84,8 @@ fi
 
 # Install/update dependencies
 print_info "Installing/updating Python dependencies..."
-pip install --upgrade pip
-pip install -r backend/requirements.txt
+pip install --upgrade pip --quiet
+pip install -r backend/requirements.txt --quiet
 print_status "Dependencies installed"
 
 # Verify MediaPipe installation
