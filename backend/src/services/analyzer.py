@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import logging
+import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -11,7 +15,10 @@ import mediapipe as mp
 import numpy as np
 
 from .. import schemas
+from . import comparison, research_bank
 from .video_utils import decode_video
+
+logger = logging.getLogger(__name__)
 
 mp_pose = mp.solutions.pose
 mp_hands = mp.solutions.hands
@@ -81,6 +88,338 @@ class FrameMetrics:
     hand_confidence: float = 0.0
 
 
+@dataclass
+class PreparedAnalysis:
+    frames: List[np.ndarray]
+    fps: float
+    stride: int
+    metrics: List[FrameMetrics]
+    phases: List[schemas.PhaseMetrics]
+    boundaries: dict
+    min_dt: float
+    labels: List[str]
+    issues: List[schemas.Issue]
+    confidence_notes: List[str]
+
+
+_PerFrameObservation = Tuple[
+    int,
+    float,
+    float,
+    Dict[str, Tuple[int, int]],
+    Optional[Tuple[int, int]],
+    Dict[str, _ArmObs],
+    Optional[float],
+    Optional[float],
+    float,
+    float,
+]
+
+
+_PREPARED_CACHE: "OrderedDict[str, Tuple[float, PreparedAnalysis]]" = OrderedDict()
+_PREPARED_CACHE_MAX_ITEMS = 4
+_PREPARED_CACHE_TTL_S = 20 * 60
+
+_ISSUE_GUIDANCE: Dict[str, Dict[str, str]] = {
+    "Knee bend shallow": {
+        "title": "Bend your knees more",
+        "cue": "Bend your knees deeper and lower your hips before you start the shot.",
+        "why": "More knee bend gives you power from your legs instead of forcing the ball with your arms.",
+        "drill": "Before each shot, drop your hips lower and feel your legs push you up.",
+        "research_title": "Your legs power the shot",
+        "research_body": "Deeper knee bend creates more lift and makes your shot easier to repeat.",
+    },
+    "Elbow angle at set is off-band": {
+        "title": "Bring your elbow in",
+        "cue": "Tuck your shooting elbow closer to your body and point it at the rim.",
+        "why": "A tucked elbow keeps the ball on a straight line to the basket.",
+        "drill": "Practice one-hand form shots and feel your elbow directly under the ball.",
+        "research_title": "Elbow alignment matters",
+        "research_body": "When your elbow points at the rim, the ball travels straighter.",
+    },
+    "Low release height": {
+        "title": "Release the ball higher",
+        "cue": "Extend your arm fully and release the ball at the top of your reach.",
+        "why": "A higher release is harder to block and gives the ball a better arc.",
+        "drill": "Focus on fully extending your arm before letting go of the ball.",
+        "research_title": "Higher release = better arc",
+        "research_body": "Releasing higher creates a steeper angle into the basket, which means more room for the ball to go in.",
+    },
+    "Rushed upper-body sequencing": {
+        "title": "Let your legs start the shot",
+        "cue": "Push up with your legs first, then bring your arm through after.",
+        "why": "Starting with your legs makes the shot smoother and more powerful.",
+        "drill": "Think 'legs first, then arm' on every shot.",
+        "research_title": "Power flows from the ground up",
+        "research_body": "The best shooters start their motion from their legs, not their arms.",
+    },
+    "Off-hand too close": {
+        "title": "Get your guide hand off the ball",
+        "cue": "Let your guide hand fall away as you release. Only your shooting hand should push the ball.",
+        "why": "If your guide hand stays on too long, it can push the ball off target.",
+        "drill": "Practice releasing with your guide hand coming off early and clean.",
+        "research_title": "Guide hand should only guide",
+        "research_body": "Your off-hand balances the ball but should not add any force to the shot.",
+    },
+    "Wrist snap looks weak": {
+        "title": "Snap your wrist harder",
+        "cue": "Flick your wrist down as you release and let your fingers point at the rim.",
+        "why": "A strong wrist snap gives the ball backspin and a cleaner release.",
+        "drill": "Exaggerate the wrist flick on close-range shots until it feels natural.",
+        "research_title": "Wrist snap creates backspin",
+        "research_body": "Backspin from your wrist makes the ball bounce softer if it hits the rim.",
+    },
+    "Short follow-through": {
+        "title": "Hold your follow-through",
+        "cue": "Keep your arm extended and wrist relaxed until the ball hits the rim.",
+        "why": "Holding your finish helps you shoot the same way every time.",
+        "drill": "Freeze your follow-through on every shot until the ball reaches the basket.",
+        "research_title": "Follow-through builds consistency",
+        "research_body": "Holding your finish reinforces good muscle memory.",
+    },
+    "Finger roll-through looks limited": {
+        "title": "Release off your fingertips",
+        "cue": "Let the ball roll off your index and middle fingers, not your palm.",
+        "why": "A fingertip release gives you better control and spin.",
+        "drill": "On form shots, focus on feeling the ball leave your fingertips last.",
+        "research_title": "Fingertips control the release",
+        "research_body": "The ball should roll off your fingers, not get pushed from your palm.",
+    },
+}
+
+_GENERIC_RESEARCH_NOTES = [
+    schemas.ResearchNote(
+        title="Consistency beats perfection",
+        body="The goal is to repeat your best shot every time, not to copy someone else's form.",
+    ),
+    schemas.ResearchNote(
+        title="Power comes from your legs",
+        body="Good shooters use their legs to generate power, which makes the arm motion easier and more accurate.",
+    ),
+]
+
+_ISSUE_PLAYBACK_SPECS: Dict[str, Dict[str, object]] = {
+    "Knee bend shallow": {
+        "title": "Bend your knees more",
+        "targets": ["left_knee", "right_knee"],
+        "directions": ["down", "down"],
+        "motion_types": ["linear", "linear"],
+        "magnitudes": [1.2, 1.2],
+        "bubble_offset": (0.0, -0.18),
+        "research_key": "lower_body_load",
+        "compare_label": "Load depth",
+    },
+    "Elbow angle at set is off-band": {
+        "title": "Bring your elbow in",
+        "targets": ["shoot_elbow"],
+        "directions": ["toward_midline"],
+        "motion_types": ["arc_down"],
+        "magnitudes": [1.0],
+        "pivot_targets": ["shoot_shoulder"],
+        "arc_radii": [0.08],
+        "bubble_offset": None,
+        "research_key": "elbow_line",
+        "compare_label": "Set position",
+    },
+    "Low release height": {
+        "title": "Finish taller",
+        "targets": ["shoot_wrist", "shoot_shoulder"],
+        "directions": ["up", "up"],
+        "motion_types": ["arc_up", "linear"],
+        "magnitudes": [1.3, 0.8],
+        "pivot_targets": ["shoot_elbow", None],
+        "arc_radii": [0.06, None],
+        "bubble_offset": (0.0, -0.18),
+        "research_key": "release_height",
+        "compare_label": "Release height",
+    },
+    "Rushed upper-body sequencing": {
+        "title": "Let your legs start the shot",
+        "targets": ["left_knee", "right_knee"],
+        "directions": ["up", "up"],
+        "motion_types": ["linear", "linear"],
+        "magnitudes": [1.0, 1.0],
+        "bubble_offset": (0.0, -0.18),
+        "research_key": "sequencing_lift",
+        "compare_label": "Arm lift timing",
+    },
+    "Off-hand too close": {
+        "title": "Get the guide hand off sooner",
+        "targets": ["guide_wrist"],
+        "directions": ["away_from_midline"],
+        "motion_types": ["arc_down"],
+        "magnitudes": [1.2],
+        "pivot_targets": ["guide_elbow"],
+        "arc_radii": [0.07],
+        "bubble_offset": None,
+        "research_key": "release_control",
+    },
+    "Wrist snap looks weak": {
+        "title": "Snap the wrist through",
+        "targets": ["shoot_wrist"],
+        "directions": ["down"],
+        "motion_types": ["rotate_cw"],
+        "magnitudes": [1.4],
+        "pivot_targets": ["shoot_wrist"],
+        "arc_radii": [0.05],
+        "bubble_offset": (0.0, -0.16),
+        "research_key": "release_control",
+        "compare_label": "Wrist finish",
+    },
+    "Short follow-through": {
+        "title": "Hold your finish",
+        "targets": ["shoot_wrist"],
+        "directions": ["up"],
+        "motion_types": ["arc_up"],
+        "magnitudes": [1.0],
+        "pivot_targets": ["shoot_elbow"],
+        "arc_radii": [0.06],
+        "bubble_offset": (0.0, -0.16),
+        "research_key": "release_control",
+        "compare_label": "Finish hold",
+    },
+    "Finger roll-through looks limited": {
+        "title": "Let the ball roll off your fingers",
+        "targets": ["shoot_index_tip", "shoot_middle_tip"],
+        "directions": ["down", "down"],
+        "motion_types": ["rotate_cw", "rotate_cw"],
+        "magnitudes": [1.2, 1.2],
+        "pivot_targets": ["shoot_wrist", "shoot_wrist"],
+        "arc_radii": [0.03, 0.03],
+        "bubble_offset": (0.0, -0.16),
+        "research_key": "release_control",
+        "compare_label": "Finger roll-through",
+    },
+}
+
+_COMPARISON_PLAYBACK_SPECS: Dict[str, Dict[str, object]] = {
+    "Load depth": {
+        "title": "Bend your knees deeper",
+        "targets": ["left_knee", "right_knee"],
+        "directions": ["down", "down"],
+        "motion_types": ["linear", "linear"],
+        "magnitudes": [1.2, 1.2],
+        "phase": "load",
+        "bubble_offset": (0.0, -0.18),
+        "research_key": "lower_body_load",
+        "compare_label": "Load depth",
+    },
+    "Set position": {
+        "title": "Tuck your elbow in more",
+        "targets": ["shoot_elbow"],
+        "directions": ["toward_midline"],
+        "motion_types": ["arc_down"],
+        "magnitudes": [1.0],
+        "pivot_targets": ["shoot_shoulder"],
+        "arc_radii": [0.08],
+        "phase": "set",
+        "bubble_offset": None,
+        "research_key": "elbow_line",
+        "compare_label": "Set position",
+    },
+    "Arm lift timing": {
+        "title": "Push up with your legs first",
+        "targets": ["left_knee", "right_knee"],
+        "directions": ["up", "up"],
+        "motion_types": ["linear", "linear"],
+        "magnitudes": [1.0, 1.0],
+        "phase": "rise",
+        "bubble_offset": (0.0, -0.18),
+        "research_key": "sequencing_lift",
+        "compare_label": "Arm lift timing",
+    },
+    "Release height": {
+        "title": "Extend your arm fully at release",
+        "targets": ["shoot_wrist", "shoot_shoulder"],
+        "directions": ["up", "up"],
+        "motion_types": ["arc_up", "linear"],
+        "magnitudes": [1.3, 0.8],
+        "pivot_targets": ["shoot_elbow", None],
+        "arc_radii": [0.06, None],
+        "phase": "release",
+        "bubble_offset": (0.0, -0.18),
+        "research_key": "release_height",
+        "compare_label": "Release height",
+    },
+    "Release lift": {
+        "title": "Release the ball higher",
+        "targets": ["shoot_wrist", "shoot_shoulder"],
+        "directions": ["up", "up"],
+        "motion_types": ["arc_up", "linear"],
+        "magnitudes": [1.3, 0.8],
+        "pivot_targets": ["shoot_elbow", None],
+        "arc_radii": [0.06, None],
+        "phase": "release",
+        "bubble_offset": (0.0, -0.18),
+        "research_key": "release_height",
+        "compare_label": "Release lift",
+    },
+    "Wrist finish": {
+        "title": "Snap your wrist down harder",
+        "targets": ["shoot_wrist"],
+        "directions": ["down"],
+        "motion_types": ["rotate_cw"],
+        "magnitudes": [1.4],
+        "pivot_targets": ["shoot_wrist"],
+        "arc_radii": [0.05],
+        "phase": "release",
+        "bubble_offset": (0.0, -0.16),
+        "research_key": "release_control",
+        "compare_label": "Wrist finish",
+    },
+    "Finish hold": {
+        "title": "Hold your follow-through longer",
+        "targets": ["shoot_wrist"],
+        "directions": ["up"],
+        "motion_types": ["arc_up"],
+        "magnitudes": [1.0],
+        "pivot_targets": ["shoot_elbow"],
+        "arc_radii": [0.06],
+        "phase": "follow_through",
+        "bubble_offset": (0.0, -0.16),
+        "research_key": "release_control",
+        "compare_label": "Finish hold",
+    },
+    "Finger roll-through": {
+        "title": "Release off your fingertips",
+        "targets": ["shoot_index_tip", "shoot_middle_tip"],
+        "directions": ["down", "down"],
+        "motion_types": ["rotate_cw", "rotate_cw"],
+        "magnitudes": [1.2, 1.2],
+        "pivot_targets": ["shoot_wrist", "shoot_wrist"],
+        "arc_radii": [0.03, 0.03],
+        "phase": "follow_through",
+        "bubble_offset": (0.0, -0.16),
+        "research_key": "release_control",
+        "compare_label": "Finger roll-through",
+    },
+}
+
+_RELEASE_CONTROL_ISSUE_PRIORITY: Dict[str, int] = {
+    "Wrist snap looks weak": 0,
+    "Finger roll-through looks limited": 1,
+    "Short follow-through": 2,
+    "Off-hand too close": 3,
+}
+
+_RELEASE_CONTROL_COMPARE_PRIORITY: Dict[str, int] = {
+    "Wrist finish": 0,
+    "Finger roll-through": 1,
+    "Finish hold": 2,
+}
+
+_COMPARISON_RESEARCH_LINES: Dict[str, str] = {
+    "Load depth": "Deeper knee bend gives you more power from your legs and makes your shot easier to repeat.",
+    "Set position": "Keeping your elbow tucked and aligned with the rim helps the ball travel straight.",
+    "Arm lift timing": "Starting the shot with your legs instead of your arms makes it smoother and more powerful.",
+    "Release height": "A higher release gives the ball better arc and is harder to block.",
+    "Release lift": "Fully extending your arm at release creates a cleaner shot.",
+    "Wrist finish": "A strong wrist snap adds backspin and makes the ball bounce softer on the rim.",
+    "Finish hold": "Holding your follow-through builds muscle memory for consistent shooting.",
+    "Finger roll-through": "Releasing off your fingertips gives you better control and spin.",
+}
+
+
 def _angle(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
     """Compute angle ABC in degrees."""
     ba = a - b
@@ -88,6 +427,257 @@ def _angle(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
     denom = (np.linalg.norm(ba) * np.linalg.norm(bc)) or 1e-6
     cosang = np.clip(np.dot(ba, bc) / denom, -1.0, 1.0)
     return float(np.degrees(np.arccos(cosang)))
+
+
+def _normalize_shooting_side(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"left", "right"}:
+        return normalized
+    return None
+
+
+def _opposite_side(side: str) -> str:
+    return "left" if side == "right" else "right"
+
+
+def _release_window_positions(per_frame: List[_PerFrameObservation]) -> Tuple[List[int], float]:
+    shoulder_refs = [
+        float(shoulder_width)
+        for _, _, _, _, _, _, shoulder_width, _, _, _ in per_frame
+        if shoulder_width and shoulder_width > 1e-6
+    ]
+    shoulder_scale = float(np.median(shoulder_refs)) if shoulder_refs else 1.0
+
+    ball_positions_with_idx: List[Tuple[int, float]] = [
+        (pos, float(ball[1]))
+        for pos, (_, _, _, _, ball, _, _, _, _, _) in enumerate(per_frame)
+        if ball is not None
+    ]
+
+    release_positions: List[int] = []
+    if ball_positions_with_idx:
+        peak_ball_y = min(y for _, y in ball_positions_with_idx)
+        ball_span = max(y for _, y in ball_positions_with_idx) - peak_ball_y
+        top_band = max(18.0, ball_span * 0.12)
+        release_positions = [
+            pos for pos, y in ball_positions_with_idx if y <= peak_ball_y + top_band
+        ]
+        if len(release_positions) > 6:
+            release_positions = [
+                pos
+                for pos, _ in sorted(ball_positions_with_idx, key=lambda item: item[1])[:6]
+            ]
+
+    if not release_positions:
+        wrist_height_rank = []
+        for pos, (_, _, _, _, _, arms, _, _, _, _) in enumerate(per_frame):
+            peak_wrist_height = max(
+                float(arms["left"].wrist_height or -1e9),
+                float(arms["right"].wrist_height or -1e9),
+            )
+            if np.isfinite(peak_wrist_height):
+                wrist_height_rank.append((pos, peak_wrist_height))
+        wrist_height_rank.sort(key=lambda item: item[1], reverse=True)
+        release_positions = [pos for pos, _ in wrist_height_rank[: min(6, len(wrist_height_rank))]]
+
+    if not release_positions:
+        release_positions = list(range(min(len(per_frame), 6)))
+
+    release_window = sorted(
+        {
+            min(max(pos + offset, 0), len(per_frame) - 1)
+            for pos in release_positions
+            for offset in (-1, 0, 1)
+        }
+    )
+    return release_window, shoulder_scale
+
+
+def _score_shooting_sides(
+    per_frame: List[_PerFrameObservation],
+) -> Tuple[Dict[str, Dict[str, Optional[float]]], Dict[str, float], Dict[str, float]]:
+    release_window, shoulder_scale = _release_window_positions(per_frame)
+    release_window_set = set(release_window)
+
+    def _side_stats(side: str) -> Dict[str, Optional[float]]:
+        overall_hand_hits = 0
+        overall_vis: List[float] = []
+        release_heights: List[float] = []
+        release_vis: List[float] = []
+        release_hand_hits = 0
+        release_dists: List[float] = []
+        snap_peaks: List[float] = []
+
+        for pos, (_, _, _, _, ball, arms, shoulder_width, _, _, _) in enumerate(per_frame):
+            arm = arms[side]
+            overall_vis.append(float(arm.arm_visibility))
+            if arm.hand_present:
+                overall_hand_hits += 1
+
+            if pos not in release_window_set:
+                continue
+
+            release_vis.append(float(arm.arm_visibility))
+            if arm.wrist_height is not None:
+                release_heights.append(float(arm.wrist_height))
+            if arm.hand_present:
+                release_hand_hits += 1
+            if ball is not None and arm.wrist_px is not None:
+                scale = (
+                    float(shoulder_width)
+                    if shoulder_width and shoulder_width > 1e-6
+                    else shoulder_scale
+                )
+                bx, by = ball
+                wx, wy = arm.wrist_px
+                release_dists.append(float(np.hypot(wx - bx, wy - by) / max(scale, 1e-6)))
+
+        for pos in range(1, len(per_frame)):
+            if pos not in release_window_set and (pos - 1) not in release_window_set:
+                continue
+            prev_t = float(per_frame[pos - 1][1])
+            curr_t = float(per_frame[pos][1])
+            dt_s = max(curr_t - prev_t, 1e-6)
+            prev_flex = per_frame[pos - 1][5][side].wrist_flexion
+            curr_flex = per_frame[pos][5][side].wrist_flexion
+            if prev_flex is None or curr_flex is None:
+                continue
+            snap_peaks.append(float((curr_flex - prev_flex) / dt_s))
+
+        return {
+            "release_dist": float(np.median(release_dists)) if release_dists else None,
+            "release_height": float(np.mean(release_heights)) if release_heights else None,
+            "release_hand_rate": release_hand_hits / max(len(release_window), 1),
+            "overall_hand_rate": overall_hand_hits / max(len(per_frame), 1),
+            "visibility": float(np.mean(overall_vis)) if overall_vis else 0.0,
+            "release_visibility": float(np.mean(release_vis)) if release_vis else None,
+            "snap_peak": max(snap_peaks) if snap_peaks else None,
+        }
+
+    stats = {side: _side_stats(side) for side in ("left", "right")}
+    release_scores = {"left": 0.0, "right": 0.0}
+
+    def _award_vote(
+        key: str,
+        *,
+        higher_is_better: bool,
+        threshold: float,
+        points: float,
+    ) -> None:
+        left_value = stats["left"].get(key)
+        right_value = stats["right"].get(key)
+        if left_value is None or right_value is None:
+            if left_value is not None and right_value is None:
+                release_scores["left"] += points * 0.5
+            elif right_value is not None and left_value is None:
+                release_scores["right"] += points * 0.5
+            return
+
+        diff = float(left_value) - float(right_value)
+        if not higher_is_better:
+            diff *= -1.0
+        if abs(diff) < threshold:
+            return
+        release_scores["left" if diff > 0 else "right"] += points
+
+    # Release-window ball proximity matters, but only near the top of the shot.
+    _award_vote("release_dist", higher_is_better=False, threshold=0.10, points=3.0)
+    # The release hand should show the clearer snap and follow-through markers.
+    _award_vote("snap_peak", higher_is_better=True, threshold=18.0, points=2.25)
+    _award_vote("release_height", higher_is_better=True, threshold=0.035, points=1.0)
+    _award_vote("release_hand_rate", higher_is_better=True, threshold=0.18, points=1.0)
+    _award_vote("release_visibility", higher_is_better=True, threshold=0.08, points=0.5)
+
+    composite_scores = {"left": release_scores["left"], "right": release_scores["right"]}
+    for side in ("left", "right"):
+        side_stats = stats[side]
+        composite_scores[side] += 0.9 * float(side_stats.get("overall_hand_rate") or 0.0)
+        composite_scores[side] += 0.6 * float(side_stats.get("visibility") or 0.0)
+        composite_scores[side] += 0.35 * float(side_stats.get("release_height") or 0.0)
+        composite_scores[side] += 0.012 * max(float(side_stats.get("snap_peak") or 0.0), 0.0)
+        if side_stats.get("release_dist") is not None:
+            composite_scores[side] += 2.6 / (1.0 + float(side_stats["release_dist"]))
+
+    return stats, release_scores, composite_scores
+
+
+def _resolve_tracking_side(
+    selected_side: str | None,
+    release_scores: Dict[str, float],
+    composite_scores: Dict[str, float],
+    *,
+    flip_margin: float = 1.0,
+) -> Tuple[str, bool]:
+    """Determine which MediaPipe landmark side corresponds to the shooting hand.
+    
+    Based on testing with mirrored front-camera video:
+    - User clicks "left" → their actual RIGHT hand gets highlighted
+    - User clicks "right" → their actual LEFT hand gets highlighted
+    
+    This means MediaPipe's labeling is inverted from the user's perspective.
+    We must INVERT the user's selection to highlight the correct hand.
+    
+    Returns:
+        Tuple of (resolved_side, was_flipped)
+    """
+    auto_side = "left" if composite_scores["left"] > composite_scores["right"] else "right"
+    
+    logger.info(
+        "Shooting side resolution: user_selected=%s, auto_detected=%s, "
+        "release_scores={left=%.2f, right=%.2f}, composite_scores={left=%.2f, right=%.2f}",
+        selected_side, auto_side,
+        release_scores.get("left", 0), release_scores.get("right", 0),
+        composite_scores.get("left", 0), composite_scores.get("right", 0),
+    )
+    
+    if selected_side is None:
+        logger.info("No user selection, using auto-detected side: %s", auto_side)
+        return auto_side, False
+
+    # INVERT the user's selection to match MediaPipe's labeling
+    # User says "right" (wants their right hand) → use MediaPipe "left"
+    # User says "left" (wants their left hand) → use MediaPipe "right"
+    mediapipe_side = _opposite_side(selected_side)
+    logger.info(
+        "User selected '%s' → using MediaPipe '%s' (inverted)",
+        selected_side, mediapipe_side
+    )
+    return mediapipe_side, True
+
+
+def _cache_key(file_bytes: bytes, shot_type: str | None, shooting_hand: str | None) -> str:
+    digest = hashlib.sha1(file_bytes).hexdigest()
+    normalized_hand = _normalize_shooting_side(shooting_hand) or "auto"
+    return f"{digest}:{shot_type or 'any'}:{normalized_hand}"
+
+
+def _get_cached_prepared(cache_key: str) -> Optional[PreparedAnalysis]:
+    now = time.time()
+    cached = _PREPARED_CACHE.get(cache_key)
+    if not cached:
+        logger.debug("Cache miss for key: %s", cache_key)
+        return None
+
+    created_at, prepared = cached
+    if now - created_at > _PREPARED_CACHE_TTL_S:
+        logger.debug("Cache expired for key: %s", cache_key)
+        _PREPARED_CACHE.pop(cache_key, None)
+        return None
+
+    logger.info("Cache hit for key: %s (shooting_side in cached result: %s)", 
+                cache_key, prepared.metrics[0].shooting_side if prepared.metrics else "N/A")
+    _PREPARED_CACHE.move_to_end(cache_key)
+    return prepared
+
+
+def _store_cached_prepared(cache_key: str, prepared: PreparedAnalysis) -> PreparedAnalysis:
+    _PREPARED_CACHE[cache_key] = (time.time(), prepared)
+    _PREPARED_CACHE.move_to_end(cache_key)
+    while len(_PREPARED_CACHE) > _PREPARED_CACHE_MAX_ITEMS:
+        _PREPARED_CACHE.popitem(last=False)
+    return prepared
 
 
 def _detect_ball(frames: List[np.ndarray]) -> List[Optional[Tuple[int, int]]]:
@@ -128,7 +718,12 @@ def _detect_ball(frames: List[np.ndarray]) -> List[Optional[Tuple[int, int]]]:
         return [None] * len(frames)
 
 
-def _extract_pose_metrics(frames: List[np.ndarray], fps: float, stride: int) -> List[FrameMetrics]:
+def _extract_pose_metrics(
+    frames: List[np.ndarray],
+    fps: float,
+    stride: int,
+    shooting_hand: str | None = None,
+) -> List[FrameMetrics]:
     """
     Extract pose + hand landmarks using MediaPipe Holistic.
 
@@ -149,21 +744,9 @@ def _extract_pose_metrics(frames: List[np.ndarray], fps: float, stride: int) -> 
     ball_positions = _detect_ball(frames)
     dt = stride / fps if fps else 1 / 30.0
 
-    # First pass: collect per-frame observations for both sides so we can pick the shooting hand.
-    per_frame: List[
-        Tuple[
-            int,
-            float,
-            float,
-            Dict[str, Tuple[int, int]],
-            Optional[Tuple[int, int]],
-            Dict[str, _ArmObs],
-            Optional[float],
-            Optional[float],
-            float,
-            float,
-        ]
-    ] = []
+    # First pass: collect per-frame observations for both sides so we can pick
+    # the right tracked arm, or correct for a mirrored/swapped landmark stream.
+    per_frame: List[_PerFrameObservation] = []
 
     for idx, frame in enumerate(frames):
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -406,44 +989,22 @@ def _extract_pose_metrics(frames: List[np.ndarray], fps: float, stride: int) -> 
     if not per_frame:
         return []
 
-    def _choose_shooting_side() -> str:
-        # Prefer ball proximity when available (works across most angles).
-        dists: Dict[str, List[float]] = {"left": [], "right": []}
-        for _, _, _, _, ball, arms, _, _, _, _ in per_frame:
-            if not ball:
-                continue
-            bx, by = ball
-            for side in ("left", "right"):
-                wp = arms[side].wrist_px
-                if wp is None:
-                    continue
-                wx, wy = wp
-                dists[side].append(float(np.hypot(wx - bx, wy - by)))
-        if len(dists["left"]) >= 3 or len(dists["right"]) >= 3:
-            left_med = float(np.median(dists["left"])) if dists["left"] else 1e9
-            right_med = float(np.median(dists["right"])) if dists["right"] else 1e9
-            return "left" if left_med < right_med else "right"
-
-        # Fallback: choose the arm with better visibility + more frequent hand detections.
-        scores = {"left": 0.0, "right": 0.0}
-        counts = {"left": 0, "right": 0}
-        for _, _, _, _, _, arms, _, _, _, _ in per_frame:
-            for side in ("left", "right"):
-                a = arms[side]
-                # Weight hand detections heavily: wrist/finger kinematics are the main discriminator.
-                scores[side] += (
-                    1.0 * a.arm_visibility
-                    + (2.0 if a.hand_present else 0.0)
-                    + (0.25 if a.wrist_flexion is not None else 0.0)
-                    + (0.10 * float(a.wrist_height or 0.0))
-                )
-                counts[side] += 1
-        left = scores["left"] / max(counts["left"], 1)
-        right = scores["right"] / max(counts["right"], 1)
-        return "left" if left > right else "right"
-
-    shooting_side = _choose_shooting_side()
-    guide_side = "left" if shooting_side == "right" else "right"
+    normalized_side = _normalize_shooting_side(shooting_hand)
+    logger.info(
+        "Extracting pose metrics: shooting_hand=%s, normalized_side=%s",
+        shooting_hand, normalized_side
+    )
+    _, release_scores, composite_scores = _score_shooting_sides(per_frame)
+    shooting_side, was_flipped = _resolve_tracking_side(
+        normalized_side,
+        release_scores,
+        composite_scores,
+    )
+    logger.info(
+        "Final shooting_side=%s (was_flipped=%s), guide_side=%s",
+        shooting_side, was_flipped, _opposite_side(shooting_side)
+    )
+    guide_side = _opposite_side(shooting_side)
 
     metrics: List[FrameMetrics] = []
     for (
@@ -620,7 +1181,7 @@ def _issues_from_metrics(
             schemas.Issue(
                 name="Knee bend shallow",
                 severity="medium",
-                delta="Try a deeper load (more knee flexion) before rising",
+                delta="Start the shot a little lower, then rise through it smoothly.",
                 confidence=avg_vis,
                 phase="load",
             )
@@ -633,7 +1194,7 @@ def _issues_from_metrics(
             schemas.Issue(
                 name="Elbow angle at set is off-band",
                 severity="low",
-                delta="Aim for a comfortable, repeatable elbow bend at set (often ~70–110°)",
+                delta="Bring your shooting elbow in slightly and keep the ball on a clean line.",
                 confidence=avg_vis,
                 phase="set",
             )
@@ -647,7 +1208,7 @@ def _issues_from_metrics(
                 schemas.Issue(
                     name="Low release height",
                     severity="medium",
-                    delta="Get to a higher set/release point (more lift before the snap)",
+                    delta="Finish taller and let the ball leave your hand higher.",
                     confidence=avg_vis,
                     phase="release",
                 )
@@ -668,7 +1229,7 @@ def _issues_from_metrics(
             schemas.Issue(
                 name="Rushed upper-body sequencing",
                 severity="medium",
-                delta="Let the legs initiate the rise, then bring the arm up (avoid early arm lift)",
+                delta="Let your legs start the shot, then bring the ball and shooting arm through.",
                 confidence=avg_vis,
                 phase="rise",
             )
@@ -681,7 +1242,7 @@ def _issues_from_metrics(
             schemas.Issue(
                 name="Off-hand too close",
                 severity="low",
-                delta="Keep guide hand relaxed with a small gap",
+                delta="Keep the guide hand soft and let it leave the ball cleanly.",
                 confidence=avg_vis,
                 phase="release",
             )
@@ -698,7 +1259,7 @@ def _issues_from_metrics(
             schemas.Issue(
                 name="Wrist snap looks weak",
                 severity="low",
-                delta="Finish with a quicker, cleaner wrist snap (\"snap down\" through the ball)",
+                delta="Flick your wrist through the shot and let your fingers finish down.",
                 confidence=hand_conf,
                 phase="release",
             )
@@ -723,7 +1284,7 @@ def _issues_from_metrics(
                 schemas.Issue(
                     name="Short follow-through",
                     severity="low",
-                    delta="Hold your finish a beat longer (wrist stays flexed; arm extends through)",
+                    delta="Hold your finish until the ball reaches the rim.",
                     confidence=float(np.clip(avg_vis * (0.5 + 0.5 * hand_rate), 0.0, 1.0)),
                     phase="follow_through",
                 )
@@ -736,13 +1297,861 @@ def _issues_from_metrics(
                 schemas.Issue(
                     name="Finger roll-through looks limited",
                     severity="low",
-                    delta="Let the fingers (esp. index/middle) roll through the release more naturally",
+                    delta="Let the ball roll off your fingers instead of pushing it.",
                     confidence=hand_conf,
                     phase="follow_through",
+                )
+            )
+
+    return issues
+
+
+def _sort_issues(issues: List[schemas.Issue]) -> List[schemas.Issue]:
+    severity_rank = {"high": 0, "medium": 1, "low": 2}
+    return sorted(
+        issues,
+        key=lambda issue: (
+            severity_rank.get(issue.severity, 3),
+            -(issue.confidence or 0.0),
+            issue.name,
+        ),
+    )
+
+
+def _prioritize_playback_issues(issues: List[schemas.Issue]) -> List[schemas.Issue]:
+    sorted_issues = _sort_issues(issues)
+    release_issues = sorted(
+        (issue for issue in sorted_issues if issue.name in _RELEASE_CONTROL_ISSUE_PRIORITY),
+        key=lambda issue: (
+            _RELEASE_CONTROL_ISSUE_PRIORITY[issue.name],
+            -(issue.confidence or 0.0),
+            issue.name,
+        ),
+    )
+
+    ordered: List[schemas.Issue] = []
+    seen_names: set[str] = set()
+
+    def push(issue: schemas.Issue) -> None:
+        if issue.name in seen_names:
+            return
+        ordered.append(issue)
+        seen_names.add(issue.name)
+
+    if sorted_issues and sorted_issues[0].name not in _RELEASE_CONTROL_ISSUE_PRIORITY:
+        push(sorted_issues[0])
+
+    for issue in release_issues[:2]:
+        push(issue)
+
+    for issue in sorted_issues:
+        push(issue)
+
+    return ordered
+
+
+def _prioritize_playback_traits(
+    traits: List[schemas.BorrowTrait],
+) -> List[schemas.BorrowTrait]:
+    release_traits = sorted(
+        (trait for trait in traits if trait.title in _RELEASE_CONTROL_COMPARE_PRIORITY),
+        key=lambda trait: (
+            _RELEASE_CONTROL_COMPARE_PRIORITY[trait.title],
+            trait.title,
+        ),
+    )
+
+    ordered: List[schemas.BorrowTrait] = []
+    seen_titles: set[str] = set()
+
+    def push(trait: schemas.BorrowTrait) -> None:
+        if trait.title in seen_titles:
+            return
+        ordered.append(trait)
+        seen_titles.add(trait.title)
+
+    if traits and traits[0].title not in _RELEASE_CONTROL_COMPARE_PRIORITY:
+        push(traits[0])
+
+    for trait in release_traits[:2]:
+        push(trait)
+
+    for trait in traits:
+        push(trait)
+
+    return ordered
+
+
+def _issue_names(issues: List[schemas.Issue]) -> set[str]:
+    return {issue.name for issue in issues}
+
+
+def _phase_lookup(phases: List[schemas.PhaseMetrics]) -> Dict[str, schemas.PhaseMetrics]:
+    return {phase.name: phase for phase in phases}
+
+
+def _build_strengths(
+    metrics: List[FrameMetrics],
+    phases: List[schemas.PhaseMetrics],
+    issues: List[schemas.Issue],
+) -> List[schemas.Strength]:
+    strengths: List[schemas.Strength] = []
+    issue_names = _issue_names(issues)
+    phase_map = _phase_lookup(phases)
+    hand_rate = _mean([m.hand_confidence for m in metrics]) or 0.0
+
+    load_knee = phase_map.get("load").angles.get("knee_flexion") if phase_map.get("load") else None
+    if load_knee is not None and load_knee <= 150 and "Knee bend shallow" not in issue_names:
+        strengths.append(
+            schemas.Strength(
+                title="Balanced base",
+                detail="You are starting the shot from a base that already looks fairly stable.",
             )
         )
 
-    return issues
+    if "Rushed upper-body sequencing" not in issue_names:
+        strengths.append(
+            schemas.Strength(
+                title="Connected timing",
+                detail="Your lower body and upper body look reasonably connected through the rise.",
+            )
+        )
+
+    if "Short follow-through" not in issue_names and hand_rate >= 0.5:
+        strengths.append(
+            schemas.Strength(
+                title="Clean finish shape",
+                detail="Your finish looks close to something you can repeat without overthinking it.",
+            )
+        )
+
+    if not strengths:
+        strengths.append(
+            schemas.Strength(
+                title="Usable read",
+                detail="This clip gives enough signal to coach from, so the next step is sharpening the biggest habit first.",
+            )
+        )
+
+    return strengths[:3]
+
+
+def _build_comparison_drill(cue: str) -> str:
+    return (
+        "Use this as a comparison rep: take 5 slow makes, focus on this single cue, "
+        "and ignore every other adjustment for the set."
+    )
+
+
+def _build_coaching_plan(
+    issues: List[schemas.Issue],
+    comparison_result: Optional[schemas.ComparisonResult] = None,
+) -> List[schemas.CoachingStep]:
+    coaching_steps: List[schemas.CoachingStep] = []
+    sorted_issues = _sort_issues(issues)
+
+    for idx, issue in enumerate(sorted_issues[:3]):
+        guide = _ISSUE_GUIDANCE.get(issue.name)
+        if guide is None:
+            cue = issue.delta or "Make this part of the motion a little cleaner and more repeatable."
+            coaching_steps.append(
+                schemas.CoachingStep(
+                    title=issue.name,
+                    cue=cue,
+                    why="This is one of the clearest opportunities to make the shot feel simpler.",
+                    drill="Focus on just this cue for your next few reps instead of trying to fix everything at once.",
+                    phase=issue.phase,
+                    priority="now" if idx == 0 else "next",
+                    confidence=issue.confidence,
+                )
+            )
+            continue
+
+        coaching_steps.append(
+            schemas.CoachingStep(
+                title=guide["title"],
+                cue=guide["cue"],
+                why=guide["why"],
+                drill=guide["drill"],
+                phase=issue.phase,
+                priority="now" if idx == 0 else "next",
+                confidence=issue.confidence,
+            )
+        )
+
+    if coaching_steps:
+        return coaching_steps
+
+    primary_match = comparison_result.primary if comparison_result else None
+    if primary_match and primary_match.borrow_traits:
+        comparison_step = primary_match.borrow_traits[0]
+        return [
+            schemas.CoachingStep(
+                title=f"Borrow from {primary_match.label}",
+                cue=comparison_step.cue or comparison_step.detail,
+                why="This is the clearest difference between your current shot and the reference style.",
+                drill=_build_comparison_drill(comparison_step.cue or comparison_step.detail),
+                phase=comparison_step.phase,
+                priority="now",
+                confidence=primary_match.confidence,
+            )
+        ]
+
+    return [
+        schemas.CoachingStep(
+            title="Keep the same rhythm",
+            cue="Your shot does not need a rebuild right now. Stay smooth and repeat the same motion.",
+            why="When the base looks clean, the biggest win is usually repetition and confidence.",
+            drill="Take a small set of relaxed makes and freeze the same finish every time.",
+            phase=None,
+            priority="now",
+            confidence=0.8,
+        )
+    ]
+
+
+def _build_research_notes(issues: List[schemas.Issue]) -> List[schemas.ResearchNote]:
+    notes: List[schemas.ResearchNote] = list(_GENERIC_RESEARCH_NOTES)
+
+    for issue in _sort_issues(issues):
+        guide = _ISSUE_GUIDANCE.get(issue.name)
+        if guide is None:
+            continue
+        title = guide.get("research_title")
+        body = guide.get("research_body")
+        if not title or not body:
+            continue
+        if any(note.title == title for note in notes):
+            continue
+        notes.append(schemas.ResearchNote(title=title, body=body))
+        if len(notes) >= 3:
+            break
+
+    return notes[:3]
+
+
+def _canonical_phase_name(phase: Optional[str]) -> Optional[str]:
+    if not phase:
+        return None
+    normalized = phase.strip().lower().replace("-", "_").replace(" ", "_")
+    return "follow_through" if normalized == "followthrough" else normalized
+
+
+def _phase_anchor_index(boundaries: dict, phase: Optional[str]) -> int:
+    normalized = _canonical_phase_name(phase) or "release"
+    if normalized == "load":
+        return int(boundaries.get("load_idx", 0))
+    if normalized == "set":
+        return int(boundaries.get("set_idx", boundaries.get("load_idx", 0)))
+    if normalized == "rise":
+        return int(boundaries.get("rise_idx", boundaries.get("set_idx", 0)))
+    if normalized == "follow_through":
+        release_idx = int(boundaries.get("release_idx", boundaries.get("rise_idx", 0)))
+        return min(int(boundaries.get("follow_idx", release_idx)), release_idx + 1)
+    return int(boundaries.get("release_idx", boundaries.get("rise_idx", 0)))
+
+
+def _direction_for_side(direction: str, shooting_side: str) -> str:
+    if direction == "toward_midline":
+        return "left" if shooting_side == "right" else "right"
+    if direction == "away_from_midline":
+        return "right" if shooting_side == "right" else "left"
+    return direction
+
+
+def _resolve_target_candidates(metric: FrameMetrics, target_name: str) -> List[str]:
+    shoot_prefix = "r" if metric.shooting_side == "right" else "l"
+    guide_prefix = "l" if shoot_prefix == "r" else "r"
+    target_map = {
+        "left_knee": ["l_knee"],
+        "right_knee": ["r_knee"],
+        "shoot_elbow": [f"{shoot_prefix}_elbow"],
+        "shoot_wrist": [f"{shoot_prefix}_wrist"],
+        "shoot_shoulder": [f"{shoot_prefix}_shoulder"],
+        "guide_wrist": [f"{guide_prefix}_wrist"],
+        "shoot_index_tip": [
+            f"{shoot_prefix}_hand_index_finger_tip",
+            f"{shoot_prefix}_wrist",
+        ],
+        "shoot_middle_tip": [
+            f"{shoot_prefix}_hand_middle_finger_tip",
+            f"{shoot_prefix}_wrist",
+        ],
+    }
+    return target_map.get(target_name, [])
+
+
+def _normalized_overlay_point(
+    point: Tuple[int, int], frame_shape: Tuple[int, int, int], rotate_output: bool
+) -> Tuple[float, float]:
+    frame_h, frame_w = frame_shape[:2]
+    px = float(point[0])
+    py = float(point[1])
+    if rotate_output:
+        return (
+            float(np.clip(py / max(frame_h, 1), 0.0, 1.0)),
+            float(np.clip(1.0 - (px / max(frame_w, 1)), 0.0, 1.0)),
+        )
+    return (
+        float(np.clip(px / max(frame_w, 1), 0.0, 1.0)),
+        float(np.clip(py / max(frame_h, 1), 0.0, 1.0)),
+    )
+
+
+def _bubble_offset_for_direction(direction: str) -> Tuple[float, float]:
+    offsets = {
+        "down": (0.0, -0.16),
+        "up": (0.0, -0.18),
+        "left": (0.14, -0.08),
+        "right": (-0.14, -0.08),
+        "down_left": (0.14, -0.14),
+        "down_right": (-0.14, -0.14),
+    }
+    return offsets.get(direction, (0.0, -0.16))
+
+
+def _style_trait_for_phase(
+    comparison_result: Optional[schemas.ComparisonResult], phase: Optional[str]
+) -> Optional[schemas.ComparisonTrait]:
+    primary = comparison_result.primary if comparison_result else None
+    if primary is None:
+        return None
+    canonical_phase = _canonical_phase_name(phase)
+    for trait in primary.borrow_traits:
+        if _canonical_phase_name(trait.phase) == canonical_phase:
+            return trait
+    return None
+
+
+def _issue_research_basis(
+    issue: schemas.Issue,
+    comparison_result: Optional[schemas.ComparisonResult] = None,
+) -> str:
+    guide = _ISSUE_GUIDANCE.get(issue.name)
+    basis = (
+        guide.get("research_body")
+        if guide
+        else "This is the most important fix we found in your shot."
+    )
+    return basis
+
+
+def _comparison_delta_lookup(
+    match: schemas.ComparisonMatch,
+) -> Dict[str, schemas.ComparisonMetricDelta]:
+    return {delta.label: delta for delta in match.metric_deltas}
+
+
+def _comparison_research_basis(
+    label: str,
+    match: schemas.ComparisonMatch,
+    delta: Optional[schemas.ComparisonMetricDelta],
+) -> str:
+    base = _COMPARISON_RESEARCH_LINES.get(
+        label,
+        "This is one of the biggest improvements you can make to your shot.",
+    )
+    return base
+
+
+def _format_measurement(value: Optional[float], unit: str) -> Optional[str]:
+    if value is None:
+        return None
+    if unit == "deg":
+        return f"{value:.0f} deg"
+    if unit == "deg/s":
+        return f"{value:.0f} deg/s"
+    if unit == "s":
+        return f"{value:.2f}s"
+    if unit == "body":
+        return f"{value:.2f} body lengths"
+    return f"{value:.2f} {unit}".strip()
+
+
+def _metric_relative_sentence(
+    research_key: Optional[str],
+    metric: FrameMetrics,
+) -> Optional[str]:
+    # Reference values from Cabarkapa et al. 2021 research
+    PROFICIENT_KNEE_ANGLE = 104.3
+    PROFICIENT_ELBOW_ANGLE = 58.4
+    PROFICIENT_RELEASE_HEIGHT = 1.47
+    
+    if research_key == "lower_body_load" and metric.knee_angle is not None:
+        diff = metric.knee_angle - PROFICIENT_KNEE_ANGLE
+        if diff > 3:
+            return f"Your knee angle is {metric.knee_angle:.0f}°. Proficient shooters average {PROFICIENT_KNEE_ANGLE:.0f}°. Bend {diff:.0f}° deeper."
+        return None
+    
+    if research_key == "sequencing_lift" and metric.shoulder_angle is not None:
+        return f"Your shoulder is at {metric.shoulder_angle:.0f}°. Your arms are moving before your legs finish pushing."
+    
+    if research_key == "release_height" and metric.wrist_height is not None:
+        diff_pct = ((PROFICIENT_RELEASE_HEIGHT - metric.wrist_height) / max(metric.wrist_height, 0.01)) * 100
+        if diff_pct > 3:
+            return f"Your release height is {metric.wrist_height:.2f}x your height. Proficient shooters release at {PROFICIENT_RELEASE_HEIGHT:.2f}x. Release {diff_pct:.0f}% higher."
+        return None
+    
+    if research_key == "elbow_line" and metric.elbow_angle is not None:
+        diff = metric.elbow_angle - PROFICIENT_ELBOW_ANGLE
+        if diff > 3:
+            return f"Your elbow angle is {metric.elbow_angle:.0f}°. Proficient shooters average {PROFICIENT_ELBOW_ANGLE:.0f}°. Tuck {diff:.0f}° tighter."
+        return None
+    
+    if research_key == "release_control" and metric.wrist_flexion is not None:
+        return f"Your wrist snap is {metric.wrist_flexion:.0f}°. A firm, consistent snap in the final 0.01s determines accuracy."
+    
+    return None
+
+
+def _comparison_relative_sentence(
+    compare_label: Optional[str],
+    delta: Optional[schemas.ComparisonMetricDelta],
+    match: Optional[schemas.ComparisonMatch],
+) -> Optional[str]:
+    if delta is None or match is None or compare_label is None:
+        return None
+
+    user_value = _format_measurement(delta.user_value, delta.unit)
+    reference_value = _format_measurement(delta.reference_value, delta.unit)
+    if user_value is None or reference_value is None:
+        return None
+
+    relation_map = {
+        "Load depth": {
+            "higher": "more upright and less loaded than",
+            "lower": "deeper than",
+            "aligned": "very close to",
+        },
+        "Set position": {
+            "higher": "more open than",
+            "lower": "more tucked than",
+            "aligned": "very close to",
+        },
+        "Arm lift timing": {
+            "higher": "rising earlier than",
+            "lower": "lagging a bit behind",
+            "aligned": "very close to",
+        },
+        "Release height": {
+            "higher": "a little taller than",
+            "lower": "a little lower than",
+            "aligned": "very close to",
+        },
+        "Release lift": {
+            "higher": "lifting higher than",
+            "lower": "not getting as tall as",
+            "aligned": "very close to",
+        },
+        "Wrist finish": {
+            "higher": "snapping harder than",
+            "lower": "finishing softer than",
+            "aligned": "very close to",
+        },
+        "Finish hold": {
+            "higher": "holding longer than",
+            "lower": "holding shorter than",
+            "aligned": "very close to",
+        },
+        "Finger roll-through": {
+            "higher": "finishing cleaner than",
+            "lower": "showing less fingertip finish than",
+            "aligned": "very close to",
+        },
+    }
+    relation = relation_map.get(compare_label, {}).get(delta.direction, "different from")
+    measure_label = {
+        "Load depth": "load angle",
+        "Set position": "set angle",
+        "Arm lift timing": "rise angle",
+        "Release height": "release height",
+        "Release lift": "release lift",
+        "Wrist finish": "wrist finish speed",
+        "Finish hold": "finish hold",
+        "Finger roll-through": "finger finish",
+    }.get(compare_label, compare_label.lower())
+
+    return (
+        f"In this rep your {measure_label} is {user_value}; "
+        f"your closest successful reference, {match.label}, sits around {reference_value}, "
+        f"so you are {relation} that reference."
+    )
+
+
+def _relative_deep_dive(
+    *,
+    research_key: Optional[str],
+    metric: FrameMetrics,
+    compare_label: Optional[str],
+    comparison_delta: Optional[schemas.ComparisonMetricDelta],
+    match: Optional[schemas.ComparisonMatch],
+) -> Optional[schemas.PlaybackDeepDive]:
+    base = research_bank.lookup_deep_dive(research_key)
+    if base is None:
+        return None
+
+    # Build relative stats based on user's actual measurements vs research data
+    stats: List[schemas.ResearchStat] = []
+    
+    # Reference values from research (Cabarkapa et al. 2021)
+    PROFICIENT_KNEE_ANGLE = 104.3  # degrees (3pt shooters)
+    PROFICIENT_HIP_ANGLE = 134.6   # degrees (3pt shooters)
+    PROFICIENT_ELBOW_ANGLE = 58.4  # degrees (3pt shooters)
+    PROFICIENT_RELEASE_HEIGHT = 1.47  # body ratio (3pt shooters)
+    
+    if research_key == "lower_body_load":
+        if metric.knee_angle is not None:
+            diff = metric.knee_angle - PROFICIENT_KNEE_ANGLE
+            if diff > 3:  # Only show if meaningfully different
+                stats.append(schemas.ResearchStat(
+                    label=f"{metric.knee_angle:.0f}°",
+                    value="Your knee angle",
+                    detail=f"Proficient shooters bend {abs(diff):.0f}° deeper than you. Aim for {PROFICIENT_KNEE_ANGLE:.0f}° or lower.",
+                ))
+        if metric.hip_angle is not None:
+            diff = PROFICIENT_HIP_ANGLE - metric.hip_angle
+            if abs(diff) > 5:
+                direction = "more" if diff > 0 else "less"
+                stats.append(schemas.ResearchStat(
+                    label=f"{metric.hip_angle:.0f}°",
+                    value="Your hip angle",
+                    detail=f"Proficient shooters have {abs(diff):.0f}° {direction} hip flexion. Target: {PROFICIENT_HIP_ANGLE:.0f}°.",
+                ))
+    
+    elif research_key == "release_height":
+        if metric.wrist_height is not None:
+            diff_pct = ((PROFICIENT_RELEASE_HEIGHT - metric.wrist_height) / max(metric.wrist_height, 0.01)) * 100
+            if diff_pct > 3:  # Only show if meaningfully lower
+                stats.append(schemas.ResearchStat(
+                    label=f"{diff_pct:.0f}%",
+                    value="Lower than proficient",
+                    detail=f"Your release: {metric.wrist_height:.2f}x height. Proficient shooters: {PROFICIENT_RELEASE_HEIGHT:.2f}x. Release {diff_pct:.0f}% higher.",
+                ))
+                stats.append(schemas.ResearchStat(
+                    label="45°",
+                    value="optimal entry angle",
+                    detail="Research shows 45° arc makes 11-12% more shots than flat or high arcs (Noah/NASA).",
+                ))
+    
+    elif research_key == "elbow_line":
+        if metric.elbow_angle is not None:
+            diff = metric.elbow_angle - PROFICIENT_ELBOW_ANGLE
+            if diff > 3:  # Elbow too wide
+                stats.append(schemas.ResearchStat(
+                    label=f"{diff:.0f}°",
+                    value="Wider than optimal",
+                    detail=f"Your elbow: {metric.elbow_angle:.0f}°. Proficient shooters: {PROFICIENT_ELBOW_ANGLE:.0f}°. Tuck {diff:.0f}° tighter.",
+                ))
+                stats.append(schemas.ResearchStat(
+                    label="ES=2.40",
+                    value="training effect",
+                    detail="Elbow training produced very large 3pt improvements (BMC Sports Science 2025).",
+                ))
+    
+    elif research_key == "sequencing_lift":
+        if metric.shoulder_angle is not None:
+            stats.append(schemas.ResearchStat(
+                label=f"{metric.shoulder_angle:.0f}°",
+                value="Your shoulder lift",
+                detail="Your arms are moving before your legs finish. Proficient shooters have higher hip velocity (g > 1.146).",
+            ))
+        stats.append(schemas.ResearchStat(
+            label="24%",
+            value="velocity increase FT→3pt",
+            detail="This power comes from legs. Skilled shooters maintain consistent release despite 24% more velocity.",
+        ))
+    
+    elif research_key == "release_control":
+        stats.append(schemas.ResearchStat(
+            label="r=-0.96",
+            value="velocity SD vs accuracy",
+            detail="Release velocity consistency is the #1 predictor of 3pt accuracy (Slegers et al. 2021).",
+        ))
+        if metric.wrist_flexion is not None:
+            stats.append(schemas.ResearchStat(
+                label=f"{metric.wrist_flexion:.0f}°",
+                value="Your wrist snap",
+                detail="The final 0.01s before release determines accuracy. Consistent wrist snap is critical.",
+            ))
+
+    return schemas.PlaybackDeepDive(
+        summary=base.summary,
+        stats=stats,
+        sources=base.sources,
+    )
+
+
+def _build_playback_cue_from_spec(
+    *,
+    cue_id: str,
+    title: str,
+    cue: str,
+    why: str,
+    research_basis: str,
+    deep_dive: Optional[schemas.PlaybackDeepDive],
+    phase: Optional[str],
+    confidence: float,
+    metric: FrameMetrics,
+    frame_shape: Tuple[int, int, int],
+    rotate_output: bool,
+    spec: Dict[str, object],
+) -> Optional[schemas.PlaybackCue]:
+    target_names = list(spec.get("targets", []))
+    directions = list(spec.get("directions", []))
+    motion_types = list(spec.get("motion_types", ["linear"] * len(target_names)))
+    magnitudes = list(spec.get("magnitudes", [1.0] * len(target_names)))
+    pivot_targets = list(spec.get("pivot_targets", [None] * len(target_names)))
+    arc_radii = list(spec.get("arc_radii", [None] * len(target_names)))
+    anchors: List[schemas.PlaybackAnchor] = []
+
+    for i, (target_name, direction_name) in enumerate(zip(target_names, directions)):
+        direction = _direction_for_side(str(direction_name), metric.shooting_side)
+        motion_type = motion_types[i] if i < len(motion_types) else "linear"
+        magnitude = magnitudes[i] if i < len(magnitudes) else 1.0
+        pivot_target = pivot_targets[i] if i < len(pivot_targets) else None
+        arc_radius = arc_radii[i] if i < len(arc_radii) else None
+        
+        candidates = _resolve_target_candidates(metric, str(target_name))
+        actual_point: Optional[Tuple[int, int]] = None
+        for candidate in candidates:
+            actual_point = metric.keypoints_px.get(candidate)
+            if actual_point is not None:
+                break
+        if actual_point is None:
+            continue
+
+        norm_x, norm_y = _normalized_overlay_point(actual_point, frame_shape, rotate_output)
+        
+        pivot_x: Optional[float] = None
+        pivot_y: Optional[float] = None
+        if pivot_target is not None:
+            pivot_candidates = _resolve_target_candidates(metric, str(pivot_target))
+            for candidate in pivot_candidates:
+                pivot_point = metric.keypoints_px.get(candidate)
+                if pivot_point is not None:
+                    pivot_x, pivot_y = _normalized_overlay_point(pivot_point, frame_shape, rotate_output)
+                    break
+        
+        anchors.append(
+            schemas.PlaybackAnchor(
+                x=norm_x,
+                y=norm_y,
+                direction=direction,
+                motion_type=str(motion_type),
+                pivot_x=pivot_x,
+                pivot_y=pivot_y,
+                arc_radius=float(arc_radius) if arc_radius is not None else None,
+                magnitude=float(magnitude),
+            )
+        )
+
+    if not anchors:
+        return None
+
+    bubble_x = float(np.mean([anchor.x for anchor in anchors]))
+    bubble_y = float(np.mean([anchor.y for anchor in anchors]))
+    override_offset = spec.get("bubble_offset")
+    if isinstance(override_offset, tuple):
+        offset_x, offset_y = override_offset
+    else:
+        offset_x, offset_y = _bubble_offset_for_direction(anchors[0].direction)
+
+    bubble_x = float(np.clip(bubble_x + float(offset_x), 0.14, 0.86))
+    bubble_y = float(np.clip(bubble_y + float(offset_y), 0.12, 0.88))
+
+    return schemas.PlaybackCue(
+        id=cue_id,
+        title=title,
+        cue=cue,
+        why=why,
+        research_basis=research_basis,
+        deep_dive=deep_dive,
+        phase=_canonical_phase_name(phase),
+        timestamp=max(metric.timestamp_s, 0.0),
+        bubble_x=bubble_x,
+        bubble_y=bubble_y,
+        anchors=anchors,
+        confidence=float(np.clip(confidence, 0.0, 1.0)),
+    )
+
+
+def _build_playback_cues(
+    metrics: List[FrameMetrics],
+    boundaries: dict,
+    issues: List[schemas.Issue],
+    frames: List[np.ndarray],
+    comparison_result: Optional[schemas.ComparisonResult] = None,
+) -> List[schemas.PlaybackCue]:
+    if not metrics or not frames:
+        return []
+
+    rotate_output = frames[0].shape[1] > frames[0].shape[0]
+    frame_shape = frames[0].shape
+    cues: List[schemas.PlaybackCue] = []
+    seen_titles: set[str] = set()
+    primary = comparison_result.primary if comparison_result else None
+    delta_lookup = _comparison_delta_lookup(primary) if primary is not None else {}
+
+    for issue in _prioritize_playback_issues(issues):
+        spec = _ISSUE_PLAYBACK_SPECS.get(issue.name)
+        if spec is None:
+            continue
+        phase = _canonical_phase_name(issue.phase)
+        metric_idx = _phase_anchor_index(boundaries, phase)
+        metric_idx = max(0, min(metric_idx, len(metrics) - 1))
+        metric = metrics[metric_idx]
+        guide = _ISSUE_GUIDANCE.get(issue.name, {})
+        title = str(spec.get("title") or guide.get("title") or issue.name)
+        if title in seen_titles:
+            continue
+        cue = str(guide.get("cue") or issue.delta or issue.name)
+        why = str(guide.get("why") or "This change should make the shot easier to repeat.")
+        research_key = spec.get("research_key")
+        compare_label = spec.get("compare_label")
+        comparison_delta = (
+            delta_lookup.get(str(compare_label)) if compare_label is not None else None
+        )
+        playback_cue = _build_playback_cue_from_spec(
+            cue_id=f"issue-{len(cues) + 1}",
+            title=title,
+            cue=cue,
+            why=why,
+            research_basis=_issue_research_basis(issue, comparison_result=comparison_result),
+            deep_dive=_relative_deep_dive(
+                research_key=str(research_key) if research_key is not None else None,
+                metric=metric,
+                compare_label=str(compare_label) if compare_label is not None else None,
+                comparison_delta=comparison_delta,
+                match=primary,
+            ),
+            phase=phase,
+            confidence=issue.confidence,
+            metric=metric,
+            frame_shape=frame_shape,
+            rotate_output=rotate_output,
+            spec=spec,
+        )
+        if playback_cue is None:
+            continue
+        cues.append(playback_cue)
+        seen_titles.add(title)
+        if len(cues) >= 3:
+            return cues
+
+    if primary is None:
+        return cues
+
+    for trait in _prioritize_playback_traits(primary.borrow_traits):
+        spec = _COMPARISON_PLAYBACK_SPECS.get(trait.title)
+        if spec is None:
+            continue
+        title = str(spec.get("title") or trait.title)
+        if title in seen_titles:
+            continue
+        phase = _canonical_phase_name(spec.get("phase") or trait.phase)
+        metric_idx = _phase_anchor_index(boundaries, phase)
+        metric_idx = max(0, min(metric_idx, len(metrics) - 1))
+        metric = metrics[metric_idx]
+        delta = delta_lookup.get(trait.title)
+        research_key = spec.get("research_key")
+        compare_label = spec.get("compare_label") or trait.title
+        playback_cue = _build_playback_cue_from_spec(
+            cue_id=f"comparison-{len(cues) + 1}",
+            title=title,
+            cue=str(trait.cue or trait.detail),
+            why=f"This is the clearest difference between your shot and the reference style.",
+            research_basis=_comparison_research_basis(trait.title, primary, delta),
+            deep_dive=_relative_deep_dive(
+                research_key=str(research_key) if research_key is not None else None,
+                metric=metric,
+                compare_label=str(compare_label) if compare_label is not None else None,
+                comparison_delta=delta,
+                match=primary,
+            ),
+            phase=phase,
+            confidence=primary.confidence,
+            metric=metric,
+            frame_shape=frame_shape,
+            rotate_output=rotate_output,
+            spec=spec,
+        )
+        if playback_cue is None:
+            continue
+        cues.append(playback_cue)
+        seen_titles.add(title)
+        if len(cues) >= 3:
+            break
+
+    return cues
+
+
+def _tracking_quality_label(confidence_notes: List[str], metrics: List[FrameMetrics]) -> str:
+    avg_vis = _mean([m.visibility for m in metrics]) or 0.0
+    hand_rate = _mean([m.hand_confidence for m in metrics]) or 0.0
+    if avg_vis >= 0.8 and hand_rate >= 0.5:
+        return "High confidence read"
+    if avg_vis >= 0.6:
+        return "Good confidence read"
+    if confidence_notes:
+        return "Use this as a rough read"
+    return "Limited confidence read"
+
+
+def _summary_label(issues: List[schemas.Issue]) -> str:
+    medium_or_high = sum(1 for issue in issues if issue.severity in {"medium", "high"})
+    if not issues:
+        return "Strong foundation"
+    if medium_or_high == 0 and len(issues) <= 2:
+        return "Small tune-up"
+    if medium_or_high <= 1:
+        return "Promising base"
+    return "Start with the fundamentals"
+
+
+def _build_summary(
+    metrics: List[FrameMetrics],
+    issues: List[schemas.Issue],
+    coaching_plan: List[schemas.CoachingStep],
+    confidence_notes: List[str],
+    comparison_result: Optional[schemas.ComparisonResult] = None,
+) -> schemas.AnalysisSummary:
+    label = _summary_label(issues)
+    tracking_quality = _tracking_quality_label(confidence_notes, metrics)
+
+    if not issues:
+        primary_match = comparison_result.primary if comparison_result else None
+        if primary_match and primary_match.borrow_traits:
+            headline = (
+                f"Your shot looks solid overall. The best next step is borrowing one clean cue "
+                f"from the {primary_match.label.lower()} style."
+            )
+            encouragement = (
+                "You do not need a rebuild. Use the comparison as a tune-up so the shot gets "
+                "cleaner without feeling different."
+            )
+        else:
+            headline = "Your shot looks clean overall. The best next step is simply repeating the same rhythm."
+            encouragement = "This looks closer to a refinement job than a full mechanics rebuild."
+        start_here = coaching_plan[0].cue
+        return schemas.AnalysisSummary(
+            label=label,
+            headline=headline,
+            start_here=start_here,
+            encouragement=encouragement,
+            tracking_quality=tracking_quality,
+        )
+
+    top_step = coaching_plan[0]
+    headline = f"Your biggest win right now is to {top_step.cue[:-1].lower() if top_step.cue.endswith('.') else top_step.cue.lower()}."
+    encouragement = "Focus on one cue at a time. Small, repeatable changes usually beat trying to fix everything in one session."
+
+    return schemas.AnalysisSummary(
+        label=label,
+        headline=headline[0].upper() + headline[1:],
+        start_here=top_step.cue,
+        encouragement=encouragement,
+        tracking_quality=tracking_quality,
+    )
 
 
 def _label_frames(metrics: List[FrameMetrics], boundaries: dict) -> List[str]:
@@ -780,26 +2189,27 @@ def _draw_skeleton_on_frame(
     """Draw pose + hand skeleton overlay on a single frame. Returns the annotated frame."""
     base_color = _PHASE_COLORS.get(phase, (255, 255, 255))
     kp = m.keypoints_px
+    skeleton_layer = frame.copy()
 
     def line(a: str, b: str):
         if a in kp and b in kp:
-            cv2.line(frame, kp[a], kp[b], base_color, 4)
+            cv2.line(skeleton_layer, kp[a], kp[b], base_color, 4)
 
     def dot(a: str):
         if a in kp:
-            cv2.circle(frame, kp[a], 8, base_color, -1)
-            cv2.circle(frame, kp[a], 10, (0, 0, 0), 2)
+            cv2.circle(skeleton_layer, kp[a], 8, base_color, -1)
+            cv2.circle(skeleton_layer, kp[a], 10, (0, 0, 0), 2)
 
     def hand_line(prefix: str, a: str, b: str, color: Tuple[int, int, int], thickness: int = 2):
         ka = f"{prefix}_hand_{a}"
         kb = f"{prefix}_hand_{b}"
         if ka in kp and kb in kp:
-            cv2.line(frame, kp[ka], kp[kb], color, thickness)
+            cv2.line(skeleton_layer, kp[ka], kp[kb], color, thickness)
 
     def hand_dot(prefix: str, a: str, color: Tuple[int, int, int], radius: int = 4):
         ka = f"{prefix}_hand_{a}"
         if ka in kp:
-            cv2.circle(frame, kp[ka], radius, color, -1)
+            cv2.circle(skeleton_layer, kp[ka], radius, color, -1)
 
     # Body skeleton
     line("r_shoulder", "r_elbow")
@@ -838,8 +2248,10 @@ def _draw_skeleton_on_frame(
 
     # Ball
     if m.ball_pos:
-        cv2.circle(frame, m.ball_pos, 15, (0, 0, 255), 3)
-        cv2.circle(frame, m.ball_pos, 5, (0, 0, 255), -1)
+        cv2.circle(skeleton_layer, m.ball_pos, 15, (0, 0, 255), 3)
+        cv2.circle(skeleton_layer, m.ball_pos, 5, (0, 0, 255), -1)
+
+    cv2.addWeighted(skeleton_layer, 0.58, frame, 0.42, 0, frame)
 
     # Phase label overlay
     if show_phase_label:
@@ -972,6 +2384,7 @@ def _keyframe_images(
         idxs = phase_to_indices[phase]
         mid = idxs[len(idxs) // 2]
         frame = frames[mid].copy()
+        skeleton_layer = frame.copy()
         m = metrics[mid]
         
         base_color = _PHASE_COLORS.get(phase, (255, 255, 255))
@@ -981,23 +2394,23 @@ def _keyframe_images(
 
         def line(a: str, b: str):
             if a in kp and b in kp:
-                cv2.line(frame, kp[a], kp[b], base_color, 4)
+                cv2.line(skeleton_layer, kp[a], kp[b], base_color, 4)
 
         def dot(a: str):
             if a in kp:
-                cv2.circle(frame, kp[a], 8, base_color, -1)
-                cv2.circle(frame, kp[a], 10, (0, 0, 0), 2)  # outline
+                cv2.circle(skeleton_layer, kp[a], 8, base_color, -1)
+                cv2.circle(skeleton_layer, kp[a], 10, (0, 0, 0), 2)  # outline
 
         def hand_line(prefix: str, a: str, b: str, color: Tuple[int, int, int], thickness: int = 2):
             ka = f"{prefix}_hand_{a}"
             kb = f"{prefix}_hand_{b}"
             if ka in kp and kb in kp:
-                cv2.line(frame, kp[ka], kp[kb], color, thickness)
+                cv2.line(skeleton_layer, kp[ka], kp[kb], color, thickness)
 
         def hand_dot(prefix: str, a: str, color: Tuple[int, int, int], radius: int = 4):
             ka = f"{prefix}_hand_{a}"
             if ka in kp:
-                cv2.circle(frame, kp[ka], radius, color, -1)
+                cv2.circle(skeleton_layer, kp[ka], radius, color, -1)
 
         # Full skeleton
         line("r_shoulder", "r_elbow")
@@ -1053,8 +2466,10 @@ def _keyframe_images(
 
         # Ball
         if m.ball_pos:
-            cv2.circle(frame, m.ball_pos, 15, (0, 0, 255), 3)
-            cv2.circle(frame, m.ball_pos, 5, (0, 0, 255), -1)
+            cv2.circle(skeleton_layer, m.ball_pos, 15, (0, 0, 255), 3)
+            cv2.circle(skeleton_layer, m.ball_pos, 5, (0, 0, 255), -1)
+
+        cv2.addWeighted(skeleton_layer, 0.58, frame, 0.42, 0, frame)
 
         if rotate_output:
             frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
@@ -1119,36 +2534,116 @@ def _boundaries_from_indices(metrics: List[FrameMetrics], boundaries: dict, min_
     return phase_bounds
 
 
-def analyze_video(
-    file_bytes: bytes, shot_type: str | None = None, return_visuals: bool = True
-) -> schemas.AnalysisResult:
+def _build_confidence_notes(
+    metrics: List[FrameMetrics],
+    frames: List[np.ndarray],
+    shooting_hand: str | None = None,
+) -> List[str]:
+    confidence_notes: List[str] = []
+    avg_vis = _mean([m.visibility for m in metrics]) or 0.0
+    if avg_vis < 0.6:
+        confidence_notes.append("Tracking was a little shaky, so treat this as a rough read instead of a perfect diagnosis.")
+    if len(metrics) < max(5, len(frames) // 4):
+        confidence_notes.append("A lot of frames were hard to track. A cleaner side or front angle will help.")
+    hand_rate = _mean([m.hand_confidence for m in metrics]) or 0.0
+    if hand_rate < 0.5:
+        confidence_notes.append("Your hand was not visible the whole time, so wrist and follow-through notes are less certain.")
+    if metrics:
+        selected_side = _normalize_shooting_side(shooting_hand)
+        if selected_side is not None:
+            tracked_side = metrics[0].shooting_side
+            if tracked_side == selected_side:
+                confidence_notes.append(
+                    f"You marked this as a {selected_side}-hand shot, so elbow, wrist, and follow-through cues stay locked to that side."
+                )
+            else:
+                confidence_notes.append(
+                    f"You marked this as a {selected_side}-hand shot, and the landmark stream looked mirrored, so we flipped the tracked side to stay on your shooting hand."
+                )
+        else:
+            confidence_notes.append(f"We read this clip as a {metrics[0].shooting_side}-hand shot.")
+    return confidence_notes
+
+
+def _prepare_analysis(
+    file_bytes: bytes,
+    shot_type: str | None = None,
+    shooting_hand: str | None = None,
+) -> PreparedAnalysis:
+    normalized_hand = _normalize_shooting_side(shooting_hand)
+    cache_key = _cache_key(file_bytes, shot_type, normalized_hand)
+    cached = _get_cached_prepared(cache_key)
+    if cached is not None:
+        return cached
+
     frames, fps, stride = decode_video(file_bytes, sample_every_n=2)
     if not frames:
         raise ValueError("Could not decode video or video empty.")
 
-    metrics = _extract_pose_metrics(frames, fps, stride)
+    metrics = _extract_pose_metrics(frames, fps, stride, shooting_hand=normalized_hand)
     if len(metrics) < 3:
         raise ValueError("Insufficient pose detections; recapture with clearer framing.")
 
     phases, boundaries, min_dt = _segment_phases(metrics)
     labels = _label_frames(metrics, boundaries)
     issues = _issues_from_metrics(metrics, phases, boundaries)
+    confidence_notes = _build_confidence_notes(metrics, frames, shooting_hand=normalized_hand)
 
-    confidence_notes: List[str] = []
-    avg_vis = _mean([m.visibility for m in metrics]) or 0.0
-    if avg_vis < 0.6:
-        confidence_notes.append("Low pose confidence; camera angle/lighting may reduce accuracy.")
-    if len(metrics) < max(5, len(frames) // 4):
-        confidence_notes.append("Many frames missing pose; try clearer side/front angle.")
-    hand_rate = _mean([m.hand_confidence for m in metrics]) or 0.0
-    if hand_rate < 0.5:
-        confidence_notes.append(
-            "Hands/fingers often occluded; wrist/finger analysis (wrist flick, follow-through) may be limited."
-        )
-    # Expose our inferred shooting side for debugging/UX.
-    if metrics:
-        confidence_notes.append(f"Inferred shooting arm: {metrics[0].shooting_side}.")
+    prepared = PreparedAnalysis(
+        frames=frames,
+        fps=fps,
+        stride=stride,
+        metrics=metrics,
+        phases=phases,
+        boundaries=boundaries,
+        min_dt=min_dt,
+        labels=labels,
+        issues=issues,
+        confidence_notes=confidence_notes,
+    )
+    return _store_cached_prepared(cache_key, prepared)
 
+
+def analyze_video(
+    file_bytes: bytes,
+    shot_type: str | None = None,
+    shooting_hand: str | None = None,
+    return_visuals: bool = True,
+) -> schemas.AnalysisResult:
+    prepared = _prepare_analysis(
+        file_bytes,
+        shot_type=shot_type,
+        shooting_hand=shooting_hand,
+    )
+    frames = prepared.frames
+    fps = prepared.fps
+    stride = prepared.stride
+    metrics = prepared.metrics
+    phases = prepared.phases
+    boundaries = prepared.boundaries
+    min_dt = prepared.min_dt
+    labels = prepared.labels
+    issues = prepared.issues
+    confidence_notes = prepared.confidence_notes
+
+    comparison_result = comparison.build_comparison(phases, shot_type=shot_type)
+    coaching_plan = _build_coaching_plan(issues, comparison_result=comparison_result)
+    strengths = _build_strengths(metrics, phases, issues)
+    research_notes = _build_research_notes(issues)
+    summary = _build_summary(
+        metrics,
+        issues,
+        coaching_plan,
+        confidence_notes,
+        comparison_result=comparison_result,
+    )
+    playback_cues = _build_playback_cues(
+        metrics,
+        boundaries,
+        issues,
+        frames,
+        comparison_result=comparison_result,
+    )
     annotated_video_b64 = None
     keyframes: List[schemas.KeyframePreview] = []
     phase_boundaries: List[schemas.PhaseBoundary] = _boundaries_from_indices(metrics, boundaries, min_dt)
@@ -1162,13 +2657,19 @@ def analyze_video(
     return schemas.AnalysisResult(
         phases=phases,
         issues=issues,
+        summary=summary,
+        coaching_plan=coaching_plan,
+        strengths=strengths,
+        research_notes=research_notes,
+        comparison=comparison_result,
+        playback_cues=playback_cues,
         confidence_notes=confidence_notes,
         annotated_video_b64=annotated_video_b64,
         keyframes=keyframes,
         phase_boundaries=phase_boundaries,
+        processing_mode="deep" if return_visuals else "quick",
     )
 
 
 def new_job_id() -> str:
     return str(uuid.uuid4())
-

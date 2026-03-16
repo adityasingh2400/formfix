@@ -1,0 +1,322 @@
+{
+  "version": 4,
+  "meta": {
+    "last_updated": "2026-03-16",
+    "description": "Comprehensive research-backed basketball shooting mechanics database"
+  },
+  "reference_values": {
+    "knee_angle": {
+      "proficient_2pt": {"mean": 109.6, "sd": 10.9, "unit": "deg"},
+      "non_proficient_2pt": {"mean": 108.0, "sd": 9.5, "unit": "deg"},
+      "proficient_3pt": {"mean": 104.3, "sd": 10.8, "unit": "deg"},
+      "non_proficient_3pt": {"mean": 104.0, "sd": 10.1, "unit": "deg"},
+      "optimal_range": [100, 115],
+      "note": "Lower angles indicate deeper knee bend. 3pt shots require slightly more bend."
+    },
+    "hip_angle": {
+      "proficient_2pt": {"mean": 136.5, "sd": 12.8, "unit": "deg"},
+      "non_proficient_2pt": {"mean": 132.4, "sd": 9.9, "unit": "deg"},
+      "proficient_3pt": {"mean": 134.6, "sd": 8.5, "unit": "deg"},
+      "non_proficient_3pt": {"mean": 127.1, "sd": 11.9, "unit": "deg"},
+      "optimal_range": [130, 140],
+      "note": "Proficient 3pt shooters show 7.5° less hip flexion than non-proficient (p=0.001)"
+    },
+    "elbow_angle": {
+      "proficient_2pt": {"mean": 59.6, "sd": 9.4, "unit": "deg"},
+      "non_proficient_2pt": {"mean": 64.7, "sd": 11.5, "unit": "deg"},
+      "proficient_3pt": {"mean": 58.4, "sd": 9.4, "unit": "deg"},
+      "non_proficient_3pt": {"mean": 66.2, "sd": 10.8, "unit": "deg"},
+      "optimal_range": [55, 65],
+      "note": "Proficient shooters have 5-8° tighter elbow angle (more tucked)"
+    },
+    "release_angle": {
+      "proficient_2pt": {"mean": 54.2, "sd": 7.9, "unit": "deg"},
+      "non_proficient_2pt": {"mean": 49.8, "sd": 11.1, "unit": "deg"},
+      "proficient_3pt": {"mean": 52.8, "sd": 6.3, "unit": "deg"},
+      "non_proficient_3pt": {"mean": 44.4, "sd": 11.6, "unit": "deg"},
+      "optimal_entry_angle": 45,
+      "optimal_range": [50, 55],
+      "note": "45° entry angle is optimal. Proficient 3pt shooters release at 8.4° higher angle."
+    },
+    "release_height": {
+      "proficient_2pt": {"mean": 1.39, "sd": 0.06, "unit": "body_ratio"},
+      "non_proficient_2pt": {"mean": 1.37, "sd": 0.11, "unit": "body_ratio"},
+      "proficient_3pt": {"mean": 1.47, "sd": 0.10, "unit": "body_ratio"},
+      "non_proficient_3pt": {"mean": 1.35, "sd": 0.11, "unit": "body_ratio"},
+      "optimal_range": [1.35, 1.50],
+      "note": "Proficient 3pt shooters release 9% higher than non-proficient (p<0.001)"
+    },
+    "release_velocity": {
+      "free_throw": {"mean": 7.1, "sd": 0.09, "unit": "m/s"},
+      "three_point": {"mean": 8.8, "sd": 0.11, "unit": "m/s"},
+      "velocity_increase_ft_to_3pt": "24%",
+      "note": "Release velocity SD strongly predicts accuracy (r=-0.96 for 3pt, r=-0.88 for FT)"
+    },
+    "basketball_height_prep": {
+      "proficient_2pt": {"mean": 0.90, "sd": 0.07, "unit": "body_ratio"},
+      "non_proficient_2pt": {"mean": 0.85, "sd": 0.09, "unit": "body_ratio"},
+      "proficient_3pt": {"mean": 0.87, "sd": 0.09, "unit": "body_ratio"},
+      "non_proficient_3pt": {"mean": 0.79, "sd": 0.09, "unit": "body_ratio"},
+      "optimal_range": [0.85, 0.92],
+      "note": "Ball should be at upper chest (shot pocket). Proficient shooters hold ball 6-10% higher."
+    },
+    "stance_width": {
+      "recommendation": "shoulder_width",
+      "note": "Proficient shooters use wider stance for stability. Shooting foot slightly ahead."
+    }
+  },
+  "entries": {
+    "lower_body_load": {
+      "summary": "Deeper knee bend loads your legs to power the shot. Proficient shooters bend 5-10° more during setup.",
+      "specific_findings": [
+        "Proficient 3pt shooters show significantly greater knee, hip, and ankle flexion (effect size g > 1.694)",
+        "This creates a lower center of mass for more stable, powerful shots",
+        "The difference is most critical BEFORE release, not at release",
+        "Wider stance provides more stable base - proficient shooters initiate with wider stance"
+      ],
+      "your_target": {
+        "knee_angle": "Aim for 100-110° knee angle at the bottom of your load",
+        "hip_angle": "Hip angle should be 130-140° when you start your shot",
+        "stance": "Feet shoulder-width apart, shooting foot slightly ahead"
+      },
+      "sources": [
+        {
+          "label": "Cabarkapa et al. 2021 - University of Kansas",
+          "detail": "Proficient shooters showed greater joint flexion during prep phase. Hip angle, heel height, and elbow angle correctly classified 81.6% of proficient vs non-proficient 3pt shooters.",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8822900/",
+          "key_stat": "81.6% classification accuracy using lower body metrics"
+        },
+        {
+          "label": "Frontiers 2026 - 3-Point Biomechanics",
+          "detail": "Markerless motion capture confirmed greater lower body flexion in proficient shooters with large effect sizes.",
+          "url": "https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2026.1732293/full",
+          "key_stat": "Effect size g > 1.694 for knee flexion differences"
+        },
+        {
+          "label": "Frontiers 2023 - Free Throw Analysis",
+          "detail": "Proficient free-throw shooters (≥70%) showed more controlled lower body motion with lower angular velocities.",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10436204/",
+          "key_stat": "≥70% FT shooters had significantly lower knee angular velocity"
+        }
+      ]
+    },
+    "sequencing_lift": {
+      "summary": "Your legs should start the shot before your arms. When arms rush ahead, accuracy drops.",
+      "specific_findings": [
+        "Proficient shooters have higher hip angular velocities during prep phase (effect size g > 1.146)",
+        "The lower body initiates the kinetic chain, transferring energy upward",
+        "Rushing the upper body breaks this chain and forces arm-only shooting",
+        "Release velocity increases 24% from free throw to 3pt distance - this power comes from legs"
+      ],
+      "your_target": {
+        "timing": "Feel your legs push up BEFORE your arms extend",
+        "hip_velocity": "Your hips should be moving upward as your arms start"
+      },
+      "sources": [
+        {
+          "label": "Frontiers 2026 - Kinetic Chain Analysis",
+          "detail": "Higher peak and mean hip angular velocities in proficient shooters during preparation.",
+          "url": "https://www.frontiersin.org/journals/sports-and-active-living/articles/10.3389/fspor.2026.1732293/full",
+          "key_stat": "Effect size g > 1.146 for hip angular velocity"
+        },
+        {
+          "label": "Slegers et al. 2021 - Release Variability",
+          "detail": "Despite 24% increase in release velocity from FT to 3pt, skilled shooters maintain consistent release parameters.",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8256521/",
+          "key_stat": "24% velocity increase with no increase in variability"
+        },
+        {
+          "label": "Okazaki & Rodacki - Distance Effects",
+          "detail": "Center of mass velocity increases with distance, driven by lower body mechanics.",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC9590067/",
+          "key_stat": "Greater elbow extension velocity for longer shots comes from leg drive"
+        }
+      ]
+    },
+    "release_height": {
+      "summary": "Proficient 3pt shooters release 9% higher than non-proficient. Higher release = better arc and harder to block.",
+      "specific_findings": [
+        "Proficient 3pt shooters: release height 1.47x body height vs 1.35x for non-proficient (p < 0.001)",
+        "Higher release creates steeper entry angle (45° optimal) for more room to score",
+        "Successful shots show significantly higher release height and flight time vs misses",
+        "Higher release allows lower release velocity with same accuracy (larger margin for error)"
+      ],
+      "your_target": {
+        "release_height": "Release at 1.45-1.50x your height for 3pt shots",
+        "arm_extension": "Fully extend your arm - don't cut the motion short",
+        "entry_angle": "Aim for 45° entry angle - this maximizes your margin for error"
+      },
+      "sources": [
+        {
+          "label": "Cabarkapa et al. 2021 - Release Height Data",
+          "detail": "Proficient 3pt shooters released significantly higher with 9% difference.",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8822900/",
+          "key_stat": "1.47 vs 1.35 body height ratio (p < 0.001)"
+        },
+        {
+          "label": "Noah Basketball / NASA Research",
+          "detail": "45° entry angle is optimal. Shooters with 45° arc make 11-12% more shots than flat or high arc shooters.",
+          "url": "https://www.noahbasketball.com/make-shots",
+          "key_stat": "45° arc: 68% FT vs 56-57% for flat/high arc"
+        },
+        {
+          "label": "Inaba et al. - Release Parameters",
+          "detail": "Higher release height allows lower release velocity with same accuracy.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/18645735/",
+          "key_stat": "Greater release height = larger margin of error for speed"
+        },
+        {
+          "label": "PMC 2021 - Jump and Release Parameters",
+          "detail": "Successful shots characterized by significantly higher release height and flight time.",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC12641682/",
+          "key_stat": "Higher release height differentiates makes from misses"
+        }
+      ]
+    },
+    "elbow_line": {
+      "summary": "Proficient shooters tuck their elbow 5-8° tighter. A tucked elbow keeps the ball on a straight line to the rim.",
+      "specific_findings": [
+        "Proficient 2pt shooters: 59.6° elbow angle vs 64.7° for non-proficient",
+        "Proficient 3pt shooters: 58.4° elbow angle vs 66.2° for non-proficient",
+        "Elbow angle is one of the top 3 discriminators between proficient and non-proficient shooters",
+        "Training elbow range (60-110°) produced very large shooting improvements (ES=2.40)"
+      ],
+      "your_target": {
+        "elbow_angle": "Aim for 55-65° elbow angle at set position",
+        "alignment": "Elbow should point at the rim, not flared out",
+        "guide_elbow": "Guide hand elbow at ~45° from body"
+      },
+      "sources": [
+        {
+          "label": "Cabarkapa et al. 2021 - Elbow Angle Analysis",
+          "detail": "Elbow angle significantly discriminated proficient from non-proficient shooters.",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8822900/",
+          "key_stat": "5-8° tighter elbow angle in proficient shooters (p < 0.05)"
+        },
+        {
+          "label": "BMC Sports Science 2025 - Elbow Training",
+          "detail": "4-week intervention training elbow range produced very large 3pt improvements.",
+          "url": "https://bmcsportsscimedrehabil.biomedcentral.com/articles/10.1186/s13102-025-01163-4",
+          "key_stat": "Effect size ES=2.40 for 3pt improvement"
+        },
+        {
+          "label": "Frontiers 2023 - Forearm Positioning",
+          "detail": "Forearm positioning is a key kinematic variable distinguishing proficient free-throw shooters.",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10436204/",
+          "key_stat": "Forearm position key discriminator for FT accuracy"
+        }
+      ]
+    },
+    "release_control": {
+      "summary": "The final 0.01 seconds before release determine accuracy. Consistent wrist snap and follow-through are critical.",
+      "specific_findings": [
+        "Misses showed more elbow-wrist coordination variability in the last 0.01s before release",
+        "Release velocity SD strongly predicts accuracy: r=-0.96 for 3pt, r=-0.88 for FT",
+        "Skilled shooters maintain tiny velocity SD (0.05-0.13 m/s) regardless of distance",
+        "Backspin alignment directly affects lateral accuracy",
+        "Index and middle finger sensitivity correlates with shot efficiency"
+      ],
+      "your_target": {
+        "wrist_snap": "Snap your wrist down firmly - fingers point at rim after release",
+        "follow_through": "Hold follow-through until ball hits rim",
+        "guide_hand": "Guide hand thumb should NOT be flat on ball - avoid thumb interference",
+        "consistency": "Focus on identical release every time - velocity consistency predicts accuracy"
+      },
+      "sources": [
+        {
+          "label": "Coordination Variability Study",
+          "detail": "Final 0.01s release window timing separates makes from misses.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/20479487/",
+          "key_stat": "0.01s window - misses showed more variability"
+        },
+        {
+          "label": "Slegers et al. 2021 - Release Velocity SD",
+          "detail": "Release velocity SD strongly predicts shooting performance.",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8256521/",
+          "key_stat": "r=-0.96 correlation between velocity SD and 3pt accuracy"
+        },
+        {
+          "label": "Backspin Alignment Research",
+          "detail": "Spin axis alignment affects lateral shooting accuracy.",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35611914/",
+          "key_stat": "Backspin alignment directly impacts accuracy"
+        },
+        {
+          "label": "Finger Proprioception Study",
+          "detail": "High proprioceptive sensitivity of index and middle fingers correlates with shot efficiency.",
+          "url": "https://sciendo.com/article/10.37190/abb-02092-2022-01",
+          "key_stat": "122 players - finger sensitivity predicts accuracy"
+        }
+      ]
+    },
+    "shot_pocket": {
+      "summary": "Your shot pocket (where you hold the ball before shooting) should be consistent. Proficient shooters hold the ball 6-10% higher.",
+      "specific_findings": [
+        "Proficient shooters hold ball at 0.87-0.90x body height vs 0.79-0.85x for non-proficient",
+        "Higher ball position in prep phase correlates with better accuracy",
+        "The 'dip' (lowering ball before shooting) increases accuracy by 7-9%",
+        "Consistent shot pocket builds muscle memory for automatic shots"
+      ],
+      "your_target": {
+        "ball_height": "Hold ball at upper chest level (0.85-0.90x your height)",
+        "elbow_height": "Elbow at 0.65-0.70x your height in prep position",
+        "dip": "A slight dip before shooting can improve consistency"
+      },
+      "sources": [
+        {
+          "label": "Cabarkapa et al. 2021 - Ball Height",
+          "detail": "Proficient shooters demonstrated higher basketball placement during prep phase.",
+          "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8822900/",
+          "key_stat": "0.87 vs 0.79 body ratio for ball height (p < 0.001)"
+        },
+        {
+          "label": "The Dip Research",
+          "detail": "Lowering ball below shot pocket before raising increases accuracy 7-9%.",
+          "url": "https://www.researchgate.net/publication/352789174",
+          "key_stat": "7-9% accuracy improvement with dip technique"
+        },
+        {
+          "label": "HoopsKing - Shot Pocket Guide",
+          "detail": "Consistent shot pocket builds muscle memory for automatic, reliable shots.",
+          "url": "https://hoopsking.com/blogs/default-blog/master-your-shot-pocket-elevate-your-basketball-game",
+          "key_stat": "Shot pocket consistency is foundation of shooting form"
+        }
+      ]
+    }
+  },
+  "coaching_insights": {
+    "drew_hanlen": {
+      "source": "NBA Strategic Skills Coach (trains Tatum, Embiid, Beal)",
+      "key_points": [
+        "Ball path is critical - incorrect path leads to higher pocket and flatter shots",
+        "Quick release comes from efficient mechanics, not rushing",
+        "Focus on the 3 mechanics that matter most for each player"
+      ],
+      "url": "https://www.nbcsportsboston.com/nba/boston-celtics/celtics-videos/trainer-drew-hanlen-breaks-down-how-he-corrects-nba-all-stars-shots/690800/"
+    },
+    "noah_basketball": {
+      "source": "Noah Basketball / NASA Research (Dr. Tom Edwards)",
+      "key_points": [
+        "45° entry angle is optimal - makes 11-12% more shots than flat or high arc",
+        "NBA/NCAA FT% has been flat at 74%/68% since 1958 - arc control is undertrained",
+        "Elite shooters (Curry, Thompson, Allen) shoot at 44-46° consistently"
+      ],
+      "url": "https://www.noahbasketball.com/make-shots"
+    }
+  },
+  "key_statistics": {
+    "classification_accuracy": {
+      "3pt_shooters": "81.6% correctly classified using hip angle, heel height, elbow angle",
+      "2pt_shooters": "62.1% correctly classified using elbow angle, elbow height, release angle"
+    },
+    "effect_sizes": {
+      "knee_flexion": "g > 1.694 (large)",
+      "hip_angular_velocity": "g > 1.146 (large)",
+      "elbow_training": "ES = 2.40 (very large)"
+    },
+    "correlations": {
+      "release_velocity_sd_to_3pt_accuracy": "r = -0.96",
+      "release_velocity_sd_to_ft_accuracy": "r = -0.88"
+    }
+  }
+}

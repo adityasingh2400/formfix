@@ -2,6 +2,12 @@
 
 FastAPI service that ingests a video, runs **MediaPipe Holistic (pose + hands)** to extract joints + finger landmarks, segments basic phases, and produces heuristic issues (knee bend, release height, sequencing, off-hand spacing, **wrist snap / follow-through**).
 
+The service now also supports:
+
+- quick coaching vs deep visual passes
+- seeded archetype comparison
+- trained reference-library overrides via `FORMFIX_REFERENCE_LIBRARY`
+
 ## Requirements
 
 - **Python 3.10–3.12** (MediaPipe doesn't support 3.13 yet)
@@ -20,8 +26,19 @@ python -m uvicorn backend.src.main:app --reload --port 8000
 - `GET /health` — service health.
 - `POST /analyze` — upload a video file (`video/*`); returns phases, heuristic issues, confidence notes, and (if requested) annotated video/keyframe overlays.
 
+## Reference Libraries
+
+Default library:
+
+- `backend/src/data/reference_profiles.json`
+
+Override it with a trained library:
+
+```bash
+export FORMFIX_REFERENCE_LIBRARY=/absolute/path/to/trained_reference_library.json
+```
+
 ## Notes
 - Dependencies include `mediapipe` and `opencv-python-headless`; wheels are provided for common platforms (tested on macOS).
 - Optional: ball detection uses **YOLOv8** via `ultralytics` if installed. If not installed, analysis still runs (just without ball-based signals).
 - Current phase segmentation is heuristic (load/set/rise/release/follow-through) using single-view pose+hands. Replace `services/analyzer.py` with improved models as they land (better 3D, archetypes, learned phase boundaries, etc.).
-

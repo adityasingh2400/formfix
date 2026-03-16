@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "source": "seeded_archetype_library",
+  "profiles": [
+    {
+      "id": "free_throw_balanced_rhythm",
+      "label": "Balanced Rhythm Free Throw",
+      "category": "archetype",
+      "source": "seeded",
+      "shot_types": ["free_throw"],
+      "summary": "Calm setup, balanced base, and a relaxed finish you can repeat under pressure.",
+      "description": "This style favors a steady dip, organized set point, and a clean hold after release.",
+      "style_tags": ["balanced base", "steady tempo", "soft finish"],
+      "targets": {
+        "load.knee_flexion": {"value": 134.0, "tolerance": 18.0, "weight": 1.2},
+        "set.elbow_angle": {"value": 93.0, "tolerance": 15.0, "weight": 1.0},
+        "rise.shoulder_angle": {"value": 80.0, "tolerance": 18.0, "weight": 0.8},
+        "release.wrist_height": {"value": 0.94, "tolerance": 0.26, "weight": 1.25},
+        "release.shoulder_angle": {"value": 99.0, "tolerance": 15.0, "weight": 0.8},
+        "release.wrist_flexion_vel_peak": {"value": 120.0, "tolerance": 52.0, "weight": 0.8},
+        "follow_through.duration": {"value": 0.30, "tolerance": 0.12, "weight": 0.9},
+        "follow_through.index_pip_angle": {"value": 158.0, "tolerance": 16.0, "weight": 0.55}
+      }
+    },
+    {
+      "id": "free_throw_high_release_hold",
+      "label": "High Release Free Throw",
+      "category": "archetype",
+      "source": "seeded",
+      "shot_types": ["free_throw"],
+      "summary": "A taller free-throw finish with a higher release and deliberate hold.",
+      "description": "This style leans on a taller release point and a visible finish freeze to keep the shot repeatable.",
+      "style_tags": ["tall finish", "high release", "hold the follow-through"],
+      "targets": {
+        "load.knee_flexion": {"value": 129.0, "tolerance": 18.0, "weight": 1.1},
+        "set.elbow_angle": {"value": 89.0, "tolerance": 14.0, "weight": 0.95},
+        "rise.shoulder_angle": {"value": 86.0, "tolerance": 18.0, "weight": 0.85},
+        "release.wrist_height": {"value": 1.08, "tolerance": 0.24, "weight": 1.35},
+        "release.shoulder_angle": {"value": 106.0, "tolerance": 14.0, "weight": 0.9},
+        "release.wrist_flexion_vel_peak": {"value": 128.0, "tolerance": 50.0, "weight": 0.8},
+        "follow_through.duration": {"value": 0.38, "tolerance": 0.12, "weight": 1.0},
+        "follow_through.index_pip_angle": {"value": 162.0, "tolerance": 15.0, "weight": 0.6}
+      }
+    },
+    {
+      "id": "spot_up_compact_rhythm",
+      "label": "Compact Spot-Up Shooter",
+      "category": "archetype",
+      "source": "seeded",
+      "shot_types": ["spot_up", "any"],
+      "summary": "Quick organization into the shot with a compact path and smooth release.",
+      "description": "This style keeps the motion tight and efficient so catch-and-shoot reps feel fast without getting rushed.",
+      "style_tags": ["compact path", "quick organization", "clean catch-and-shoot rhythm"],
+      "targets": {
+        "load.knee_flexion": {"value": 139.0, "tolerance": 16.0, "weight": 1.0},
+        "set.elbow_angle": {"value": 88.0, "tolerance": 15.0, "weight": 1.0},
+        "rise.shoulder_angle": {"value": 84.0, "tolerance": 16.0, "weight": 0.85},
+        "release.wrist_height": {"value": 0.98, "tolerance": 0.22, "weight": 1.2},
+        "release.shoulder_angle": {"value": 101.0, "tolerance": 14.0, "weight": 0.8},
+        "release.wrist_flexion_vel_peak": {"value": 136.0, "tolerance": 48.0, "weight": 0.9},
+        "follow_through.duration": {"value": 0.28, "tolerance": 0.11, "weight": 0.8},
+        "follow_through.index_pip_angle": {"value": 160.0, "tolerance": 14.0, "weight": 0.55}
+      }
+    },
+    {
+      "id": "spot_up_lift_finish",
+      "label": "Lift-and-Finish Spot-Up",
+      "category": "archetype",
+      "source": "seeded",
+      "shot_types": ["spot_up", "any"],
+      "summary": "A slightly deeper load and taller finish that create a more vertical spot-up release.",
+      "description": "This style uses the lower body to create lift first, then finishes high through the shot.",
+      "style_tags": ["legs first", "vertical lift", "tall release"],
+      "targets": {
+        "load.knee_flexion": {"value": 131.0, "tolerance": 17.0, "weight": 1.15},
+        "set.elbow_angle": {"value": 92.0, "tolerance": 15.0, "weight": 0.95},
+        "rise.shoulder_angle": {"value": 89.0, "tolerance": 17.0, "weight": 0.85},
+        "release.wrist_height": {"value": 1.11, "tolerance": 0.23, "weight": 1.3},
+        "release.shoulder_angle": {"value": 108.0, "tolerance": 14.0, "weight": 0.9},
+        "release.wrist_flexion_vel_peak": {"value": 132.0, "tolerance": 50.0, "weight": 0.8},
+        "follow_through.duration": {"value": 0.34, "tolerance": 0.12, "weight": 0.9},
+        "follow_through.index_pip_angle": {"value": 161.0, "tolerance": 15.0, "weight": 0.55}
+      }
+    },
+    {
+      "id": "pull_up_one_motion",
+      "label": "One-Motion Pull-Up",
+      "category": "archetype",
+      "source": "seeded",
+      "shot_types": ["pull_up", "any"],
+      "summary": "Continuous flow from the rise into release, with very little pause at the top.",
+      "description": "This style is built for fluid pull-up rhythm where the body and ball keep moving together.",
+      "style_tags": ["continuous flow", "one motion", "quick release"],
+      "targets": {
+        "load.knee_flexion": {"value": 136.0, "tolerance": 17.0, "weight": 1.0},
+        "set.elbow_angle": {"value": 86.0, "tolerance": 14.0, "weight": 1.0},
+        "rise.shoulder_angle": {"value": 90.0, "tolerance": 16.0, "weight": 0.95},
+        "release.wrist_height": {"value": 0.97, "tolerance": 0.23, "weight": 1.15},
+        "release.shoulder_angle": {"value": 102.0, "tolerance": 14.0, "weight": 0.8},
+        "release.wrist_flexion_vel_peak": {"value": 138.0, "tolerance": 46.0, "weight": 0.9},
+        "follow_through.duration": {"value": 0.25, "tolerance": 0.11, "weight": 0.8},
+        "follow_through.index_pip_angle": {"value": 158.0, "tolerance": 15.0, "weight": 0.5}
+      }
+    },
+    {
+      "id": "pull_up_power_rise",
+      "label": "Power Rise Pull-Up",
+      "category": "archetype",
+      "source": "seeded",
+      "shot_types": ["pull_up", "any"],
+      "summary": "A stronger lower-body rise with a higher release point at the end of the pull-up.",
+      "description": "This style leans on lift and release height to create space after the pull-up gather.",
+      "style_tags": ["power up", "higher finish", "space-making release"],
+      "targets": {
+        "load.knee_flexion": {"value": 128.0, "tolerance": 17.0, "weight": 1.2},
+        "set.elbow_angle": {"value": 91.0, "tolerance": 15.0, "weight": 0.95},
+        "rise.shoulder_angle": {"value": 94.0, "tolerance": 16.0, "weight": 0.95},
+        "release.wrist_height": {"value": 1.13, "tolerance": 0.24, "weight": 1.35},
+        "release.shoulder_angle": {"value": 109.0, "tolerance": 14.0, "weight": 0.9},
+        "release.wrist_flexion_vel_peak": {"value": 134.0, "tolerance": 48.0, "weight": 0.85},
+        "follow_through.duration": {"value": 0.31, "tolerance": 0.12, "weight": 0.85},
+        "follow_through.index_pip_angle": {"value": 160.0, "tolerance": 15.0, "weight": 0.55}
+      }
+    }
+  ]
+}
