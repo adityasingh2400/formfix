@@ -161,6 +161,47 @@ class PlaybackCue(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
+class PlaybackScriptCue(BaseModel):
+    cue_id: str
+    entry_start: float = Field(ge=0.0)
+    focus_start: float = Field(ge=0.0)
+    focus_time: float = Field(ge=0.0)
+    focus_end: float = Field(ge=0.0)
+    exit_end: float = Field(ge=0.0)
+    entry_rate: float = Field(gt=0.0)
+    focus_rate: float = Field(gt=0.0)
+    exit_rate: float = Field(gt=0.0)
+    freeze_ms: int = Field(ge=0)
+
+
+class CueArtifact(BaseModel):
+    cue_id: str
+    label: str
+    url: str
+
+
+class EvidenceArtifacts(BaseModel):
+    normalized_source_url: Optional[str] = None
+    annotated_replay_url: Optional[str] = None
+    cue_clip_urls: List[CueArtifact] = Field(default_factory=list)
+    cue_still_urls: List[CueArtifact] = Field(default_factory=list)
+    frame_strip_urls: List[CueArtifact] = Field(default_factory=list)
+
+
+class MediaProfile(BaseModel):
+    width: int = Field(ge=1)
+    height: int = Field(ge=1)
+    fps: float = Field(ge=0.0)
+    duration_s: float = Field(ge=0.0)
+    frame_count: int = Field(ge=0)
+    codec: Optional[str] = None
+    bitrate: Optional[int] = Field(default=None, ge=0)
+    rotation: int = 0
+    detail_tier: str = Field(description="ultra_detail|high_detail|standard_detail")
+    capture_assessment: str
+    dense_refinement_used: bool = False
+
+
 class AnalysisResult(BaseModel):
     phases: List[PhaseMetrics]
     issues: List[Issue]
@@ -170,7 +211,10 @@ class AnalysisResult(BaseModel):
     research_notes: List[ResearchNote] = Field(default_factory=list)
     comparison: ComparisonResult
     playback_cues: List[PlaybackCue] = Field(default_factory=list)
+    playback_script: List[PlaybackScriptCue] = Field(default_factory=list)
     confidence_notes: List[str] = Field(default_factory=list)
+    media_profile: Optional[MediaProfile] = None
+    artifacts: EvidenceArtifacts = Field(default_factory=EvidenceArtifacts)
     annotated_video_b64: Optional[str] = Field(
         default=None, description="Base64 data URL of annotated video"
     )
@@ -187,7 +231,8 @@ class AnalysisResult(BaseModel):
 
 class KeyframePreview(BaseModel):
     phase: str
-    image_b64: str
+    image_b64: Optional[str] = None
+    image_url: Optional[str] = None
 
 
 class PhaseBoundary(BaseModel):
@@ -201,3 +246,15 @@ class AnalyzeResponse(BaseModel):
     status: str = Field(description="completed|queued|failed")
     result: Optional[AnalysisResult] = None
     message: Optional[str] = None
+
+
+class AnalysisJobResponse(BaseModel):
+    job_id: str
+    status: str = Field(description="queued|running|completed|failed")
+    stage: str = Field(
+        description="queued|inspecting|normalizing|coarse_scan|dense_refine|rendering|completed|failed"
+    )
+    progress_message: str
+    media_profile: Optional[MediaProfile] = None
+    result: Optional[AnalysisResult] = None
+    error: Optional[str] = None

@@ -885,6 +885,18 @@
       align-items: center;
     }
 
+    .mode-switch {
+      display: inline-flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .replay-mode-btn.active {
+      background: rgba(240, 107, 36, 0.12);
+      border-color: rgba(240, 107, 36, 0.28);
+      color: var(--accent-deep);
+    }
+
     .video-stage {
       position: relative;
       width: 100%;
@@ -1410,6 +1422,27 @@
       line-height: 1.4;
     }
 
+    .scrub-panel {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 12px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid rgba(23, 33, 43, 0.08);
+      background: rgba(23, 33, 43, 0.04);
+    }
+
+    .scrub-panel label {
+      font-weight: 700;
+      color: var(--ink-soft);
+      white-space: nowrap;
+    }
+
+    .scrub-panel input[type="range"] {
+      width: 100%;
+    }
+
     .cue-rail {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1453,6 +1486,76 @@
       display: block;
       margin-bottom: 4px;
       color: var(--ink);
+    }
+
+    .cue-evidence-panel {
+      margin-top: 14px;
+      padding: 16px;
+      border-radius: 22px;
+      border: 1px solid rgba(23, 33, 43, 0.08);
+      background: rgba(255, 255, 255, 0.78);
+      display: grid;
+      gap: 12px;
+    }
+
+    .cue-evidence-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .cue-evidence-head h3 {
+      font-size: 1.15rem;
+      margin-top: 6px;
+      letter-spacing: -0.03em;
+    }
+
+    .cue-clip-card,
+    .cue-strip-card {
+      border-radius: 18px;
+      overflow: hidden;
+      border: 1px solid rgba(23, 33, 43, 0.08);
+      background: #0f1419;
+    }
+
+    .cue-clip-card video,
+    .cue-strip-card img {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: contain;
+      background: #0f1419;
+    }
+
+    .cue-proof-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .proof-card {
+      border-radius: 18px;
+      overflow: hidden;
+      border: 1px solid rgba(23, 33, 43, 0.08);
+      background: rgba(255, 255, 255, 0.84);
+    }
+
+    .proof-card img {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: contain;
+      background: #0f1419;
+    }
+
+    .proof-card strong {
+      display: block;
+      padding: 12px 14px;
+      font-size: 0.84rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
     }
 
     .cue-text {
@@ -1680,7 +1783,7 @@
 
     .film-support-row {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 12px;
       margin-top: 14px;
     }
@@ -2818,7 +2921,7 @@
         <div class="capture-top">
           <div class="capture-copy">
             <h2>Analyze one shot</h2>
-            <p>Use one short clip with your full body and release in frame.</p>
+            <p>Best results come from the original slow-motion clip from your phone. Native 4K 240 fps is ideal, but we will still read standard video as a fallback.</p>
           </div>
           <div class="api-pill" id="apiPill">Checking backend...</div>
         </div>
@@ -2827,11 +2930,11 @@
           <div class="dropzone-core">
             <div class="drop-icon">+</div>
             <h3>Drag and drop your shot here</h3>
-            <p>Or choose a video. Side view is best, but any clean full-body rep works.</p>
+            <p>Upload the original slow-motion file when you can. 4K 240 fps is the gold-standard; 1080p 120/240 fps is still strong.</p>
 
             <div class="capture-actions">
               <button class="btn-ghost" id="chooseBtn" type="button">Choose video</button>
-              <button class="btn-ghost" id="recordBtn" type="button">Use camera</button>
+              <button class="btn-ghost" id="recordBtn" type="button">Use camera (fallback)</button>
               <button class="btn hidden" id="analyzeBtn" type="button">Analyze shot</button>
             </div>
 
@@ -2858,8 +2961,8 @@
 
           <div class="dropzone-loader" id="dropzoneLoader">
             <div class="loader-ring" aria-hidden="true"></div>
-            <strong id="dropzoneLoaderTitle">Analyzing your shot</strong>
-            <p id="dropzoneLoaderText">Tracking the replay and building the first feedback cue.</p>
+            <strong id="dropzoneLoaderTitle">Preparing your slow-motion read</strong>
+            <p id="dropzoneLoaderText">Inspecting frame density and building the high-detail evidence pack.</p>
           </div>
 
           <input type="hidden" id="shootingHand" value="" />
@@ -2874,8 +2977,8 @@
         <div class="camera-panel" id="cameraPanel">
           <div class="camera-head">
             <div>
-              <h3>Record a practice clip</h3>
-              <p class="empty-copy">Use this if you want the easiest possible first run. Start the camera, record one rep, then stop.</p>
+              <h3>Record a fallback practice clip</h3>
+              <p class="empty-copy">This browser recording path still works, but it will not match a native phone slow-motion upload for detail.</p>
             </div>
             <button class="btn-ghost" id="closeCameraBtn" type="button">Close camera</button>
           </div>
@@ -2901,15 +3004,15 @@
       <div class="status-steps">
         <div class="status-step" data-step="clip">
           <strong>1. Clip ready</strong>
-          <span>Your video is loaded and ready to send.</span>
+          <span>Upload is stored and the capture profile is being inspected.</span>
         </div>
         <div class="status-step" data-step="coach">
-          <strong>2. Tracking replay</strong>
-          <span>Slowing the shot down and finding the key teaching moments.</span>
+          <strong>2. Refine timing</strong>
+          <span>Scanning the clip, locating the cue windows, and sharpening the slow-motion timestamps.</span>
         </div>
         <div class="status-step" data-step="visuals">
-          <strong>3. Cue tour ready</strong>
-          <span>Your paused replay and visual coaching cues are ready.</span>
+          <strong>3. Render evidence</strong>
+          <span>Building the replay, proof frames, frame strips, and cue clips.</span>
         </div>
       </div>
     </section>
@@ -2944,6 +3047,11 @@
               <h2>See the fix on your shot</h2>
             </div>
             <div class="replay-controls">
+              <div class="mode-switch" id="replayModeSwitch">
+                <button class="btn-ghost replay-mode-btn active" data-mode="guided" type="button">Guided</button>
+                <button class="btn-ghost replay-mode-btn" data-mode="real" type="button">Real speed</button>
+                <button class="btn-ghost replay-mode-btn" data-mode="scrub" type="button">Frame scrub</button>
+              </div>
               <button class="btn" id="playTourBtn" type="button">Replay feedback</button>
             </div>
           </div>
@@ -3012,8 +3120,34 @@
           </div>
 
           <div class="replay-note" id="replayStatus">The guided review starts from frame one and eases into each teaching moment.</div>
+          <div class="scrub-panel hidden" id="scrubPanel">
+            <label for="frameScrubber">Frame scrub</label>
+            <input type="range" id="frameScrubber" min="0" max="1000" value="0" step="1" />
+          </div>
           <div class="cue-rail" id="cueRail"></div>
+          <article class="cue-evidence-panel hidden" id="cueEvidencePanel">
+            <div class="cue-evidence-head">
+              <div>
+                <div class="section-kicker">Evidence pack</div>
+                <h3 id="cueEvidenceTitle">Proof frames and cue clip</h3>
+              </div>
+              <span class="pill" id="cueEvidenceBadge">High-detail read</span>
+            </div>
+            <div class="cue-clip-card hidden" id="cueClipCard">
+              <video id="cueClipVideo" muted loop playsinline controls></video>
+            </div>
+            <div class="cue-proof-grid" id="cueProofGrid"></div>
+            <div class="cue-strip-card hidden" id="cueStripCard">
+              <img id="cueStripImage" alt="Cue frame strip" />
+            </div>
+          </article>
           <div class="film-support-row">
+            <article class="micro-card" id="mediaProfileCard">
+              <div class="section-kicker">Capture quality</div>
+              <h3 id="mediaProfileTier">Waiting for a clip</h3>
+              <p class="micro-copy" id="mediaProfileSummary">We will explain whether your upload qualifies for a high-detail slow-motion read.</p>
+            </article>
+
             <article class="micro-card">
               <div class="section-kicker">From this rep</div>
               <h3 id="comparisonLabel">Waiting for a clip</h3>
@@ -3155,6 +3289,9 @@
     const comparisonLabelEl = document.getElementById("comparisonLabel");
     const comparisonOverviewEl = document.getElementById("comparisonOverview");
     const comparisonFitEl = document.getElementById("comparisonFit");
+    const mediaProfileCardEl = document.getElementById("mediaProfileCard");
+    const mediaProfileTierEl = document.getElementById("mediaProfileTier");
+    const mediaProfileSummaryEl = document.getElementById("mediaProfileSummary");
     const strengthTitleEl = document.getElementById("strengthTitle");
     const strengthDetailEl = document.getElementById("strengthDetail");
     const confidenceCard = document.getElementById("confidenceCard");
@@ -3162,6 +3299,17 @@
     const replayStatusEl = document.getElementById("replayStatus");
     const cueRailEl = document.getElementById("cueRail");
     const playTourBtn = document.getElementById("playTourBtn");
+    const replayModeButtons = Array.from(document.querySelectorAll(".replay-mode-btn"));
+    const scrubPanelEl = document.getElementById("scrubPanel");
+    const frameScrubberEl = document.getElementById("frameScrubber");
+    const cueEvidencePanelEl = document.getElementById("cueEvidencePanel");
+    const cueEvidenceTitleEl = document.getElementById("cueEvidenceTitle");
+    const cueEvidenceBadgeEl = document.getElementById("cueEvidenceBadge");
+    const cueClipCardEl = document.getElementById("cueClipCard");
+    const cueClipVideoEl = document.getElementById("cueClipVideo");
+    const cueProofGridEl = document.getElementById("cueProofGrid");
+    const cueStripCardEl = document.getElementById("cueStripCard");
+    const cueStripImageEl = document.getElementById("cueStripImage");
     const filmRoomEl = document.getElementById("filmRoom");
     const feedbackConnectorEl = document.getElementById("feedbackConnector");
     const feedbackConnectorPathEl = document.getElementById("feedbackConnectorPath");
@@ -3190,16 +3338,22 @@
     let recordStartMs = 0;
     let currentFileUrl = null;
     let currentAnalysis = null;
+    let currentJobId = null;
     let currentPlaybackCues = [];
+    let currentPlaybackScript = [];
     let currentCueIndex = -1;
     let cuePlaybackMode = "idle";
     let cueAnimationFrameId = null;
+    let cueTimeoutId = null;
     let cueReplayTargetTime = null;
     let cuePlaybackTargetIndex = -1;
     let cuePlaybackArrivalStatus = "";
+    let cuePlaybackFreezeConsumed = false;
+    let cuePlaybackExitApplied = false;
     let cueExplainOpen = false;
     let triggeredCueIds = new Set();
     let archetypeIntroShown = false;
+    let replayMode = "guided";
     let lastCueAnchorPoint = null;
     let lastCueAnchorPoints = [];
     let lastCueProtectedRect = null;
@@ -3225,6 +3379,10 @@
     playTourBtn.addEventListener("click", handleReplayCueClick);
     explainBtn.addEventListener("click", handleExplainFurther);
     nextFeedbackBtn.addEventListener("click", handleNextFeedback);
+    replayModeButtons.forEach((button) => {
+      button.addEventListener("click", () => setReplayMode(button.dataset.mode || "guided"));
+    });
+    frameScrubberEl.addEventListener("input", handleFrameScrub);
     archetypeContinueBtnEl.addEventListener("click", () => {
       hideArchetypeIntro();
       proceedToGuidedReview();
@@ -3266,11 +3424,15 @@
     annotatedVideo.addEventListener("canplay", () => requestOverlayLayout(2));
     annotatedVideo.addEventListener("seeked", () => requestOverlayLayout(2));
     annotatedVideo.addEventListener("seeking", clearCueTimers);
+    annotatedVideo.addEventListener("timeupdate", syncScrubberToVideo);
     annotatedVideo.addEventListener("play", updateReplayButton);
     annotatedVideo.addEventListener("pause", updateReplayButton);
     annotatedVideo.addEventListener("ended", () => {
       cuePlaybackMode = "idle";
       cueReplayTargetTime = null;
+      cuePlaybackTargetIndex = -1;
+      cuePlaybackArrivalStatus = "";
+      resetCuePlaybackPhaseState();
       updateReplayButton();
     });
     window.addEventListener("resize", () => requestOverlayLayout(2));
@@ -3330,6 +3492,136 @@
       return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeoutId));
     }
 
+    function wait(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function toApiUrl(value) {
+      if (!value) return "";
+      if (/^(https?:|data:|blob:)/i.test(value)) return value;
+      if (value.startsWith("/") && apiBase) return `${apiBase}${value}`;
+      return value;
+    }
+
+    function detailTierLabel(detailTier) {
+      if (detailTier === "ultra_detail") return "4K 240 fps high-detail read";
+      if (detailTier === "high_detail") return "High-detail slow-motion read";
+      return "Standard-detail fallback";
+    }
+
+    function renderMediaProfile(profile) {
+      if (!profile) {
+        mediaProfileTierEl.textContent = "Waiting for a clip";
+        mediaProfileSummaryEl.textContent = "We will explain whether your upload qualifies for a high-detail slow-motion read.";
+        return;
+      }
+
+      mediaProfileTierEl.textContent = detailTierLabel(profile.detail_tier);
+      mediaProfileSummaryEl.textContent = `${profile.capture_assessment} ${Math.round(profile.fps || 0)} fps | ${profile.width}x${profile.height} | ${formatSeconds(profile.duration_s || 0)}.`;
+    }
+
+    function statusPayloadForJob(job) {
+      const stage = job?.stage || "queued";
+      if (stage === "completed") {
+        return {
+          badgeText: "Ready",
+          message: job.progress_message || "Analysis complete.",
+          tone: "success",
+          activeStep: "done",
+        };
+      }
+      if (stage === "failed") {
+        return {
+          badgeText: "Issue",
+          message: job.error || job.progress_message || "Analysis failed.",
+          tone: "error",
+          activeStep: "clip",
+        };
+      }
+      if (stage === "queued" || stage === "inspecting") {
+        return {
+          badgeText: "Inspecting",
+          message: job.progress_message || "Checking frame density and upload quality.",
+          tone: "working",
+          activeStep: "clip",
+        };
+      }
+      if (stage === "normalizing" || stage === "coarse_scan" || stage === "dense_refine") {
+        return {
+          badgeText: "Refining",
+          message: job.progress_message || "Scanning the shot and sharpening the cue timings.",
+          tone: "working",
+          activeStep: "coach",
+        };
+      }
+      return {
+        badgeText: "Rendering",
+        message: job.progress_message || "Building replay assets and evidence frames.",
+        tone: "working",
+        activeStep: "visuals",
+      };
+    }
+
+    function updateStatusFromJob(job) {
+      const statusPayload = statusPayloadForJob(job);
+      showStatus(
+        statusPayload.badgeText,
+        statusPayload.message,
+        statusPayload.tone,
+        statusPayload.activeStep
+      );
+      if (job?.media_profile) {
+        renderMediaProfile(job.media_profile);
+      }
+    }
+
+    async function submitAnalysisJob(file) {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      if (shootingHand.value) {
+        form.append("shooting_hand", shootingHand.value);
+      }
+      if (shotType.value) {
+        form.append("shot_type", shotType.value);
+      }
+
+      const response = await fetch(`${apiBase}/analysis-jobs`, {
+        method: "POST",
+        body: form,
+      });
+
+      if (!response.ok) {
+        let detail = response.statusText;
+        try {
+          const errorJson = await response.json();
+          detail = errorJson.detail || detail;
+        } catch (error) {
+          detail = (await response.text()) || detail;
+        }
+        throw new Error(detail);
+      }
+
+      return response.json();
+    }
+
+    async function pollAnalysisJob(jobId) {
+      while (true) {
+        const response = await fetch(`${apiBase}/analysis-jobs/${jobId}`);
+        if (!response.ok) {
+          throw new Error("The analysis job could not be read back from the backend.");
+        }
+        const job = await response.json();
+        updateStatusFromJob(job);
+        if (job.status === "completed") {
+          return job;
+        }
+        if (job.status === "failed") {
+          throw new Error(job.error || job.progress_message || "Analysis failed.");
+        }
+        await wait(900);
+      }
+    }
+
     function setFileInputFiles(file) {
       const transfer = new DataTransfer();
       transfer.items.add(file);
@@ -3347,15 +3639,16 @@
       setDropzoneFileState(true);
       syncShootingHandButtons();
       fileNameEl.textContent = `${sourceLabel}: ${file.name}`;
-      fileHintEl.textContent = `${prettyBytes(file.size)} loaded. Pick your shooting hand to start analysis.`;
+      fileHintEl.textContent = `${prettyBytes(file.size)} loaded. Slow-motion is ideal. Pick your shooting hand to start analysis.`;
       selectedClipLabel.textContent = file.name;
+      renderMediaProfile(null);
     }
 
     function setCaptureAnalyzingState(isAnalyzing, message = "") {
       dropzone.classList.toggle("is-analyzing", isAnalyzing);
       dropzoneLoader.classList.toggle("hidden", !isAnalyzing);
-      dropzoneLoaderTitle.textContent = isAnalyzing ? "Analyzing your shot" : "Analyzing your shot";
-      dropzoneLoaderText.textContent = message || "Tracking the replay and building the first feedback cue.";
+      dropzoneLoaderTitle.textContent = isAnalyzing ? "Preparing your slow-motion read" : "Preparing your slow-motion read";
+      dropzoneLoaderText.textContent = message || "Inspecting frame density and building the evidence pack.";
       if (isAnalyzing) {
         closeCameraPanel();
       }
@@ -3411,7 +3704,7 @@
       origVideo.load();
       selectedClipLabel.textContent = "No clip yet";
       fileNameEl.textContent = "No clip selected yet.";
-      fileHintEl.textContent = "Tip: One clean rep is better than a long messy video.";
+      fileHintEl.textContent = "Tip: One clean slow-motion rep is better than a long messy video.";
     }
 
     function startNewAnalysis() {
@@ -3456,7 +3749,7 @@
           audio: false,
         });
         cameraPreview.srcObject = mediaStream;
-        fileHintEl.textContent = "Camera is live. Record one rep when you are ready.";
+        fileHintEl.textContent = "Camera is live. This fallback path works, but a native phone slow-motion upload will be much more useful.";
       } catch (error) {
         fileHintEl.textContent = "Camera access was blocked. You can still upload a clip instead.";
       }
@@ -3540,7 +3833,7 @@
       });
       setFileInputFiles(file);
       attachFile(file, "Recorded clip");
-      fileHintEl.textContent = "Recording saved. Pick your shooting hand to start analysis.";
+      fileHintEl.textContent = "Recording saved. Pick your shooting hand to start a standard-detail fallback read.";
     }
 
     async function handleAnalyze() {
@@ -3565,25 +3858,30 @@
       setCaptureControlsDisabled(true);
       setCaptureAnalyzingState(
         true,
-        `Tracking ${file.name} and building the first feedback cue.`
+        `Uploading ${file.name} and checking whether it qualifies for a high-detail slow-motion read.`
       );
       resetFilmRoom();
-      hideStatusCard();
+      showStatus("Inspecting", "Uploading the clip and reading the capture profile.", "working", "clip");
       let analysisReady = false;
 
       try {
-        const data = await submitAnalysis(file);
-        renderAnalysis(data.result, shotType.value);
+        const queuedJob = await submitAnalysisJob(file);
+        currentJobId = queuedJob.job_id;
+        updateStatusFromJob(queuedJob);
+        const completedJob = await pollAnalysisJob(queuedJob.job_id);
+        renderAnalysis(completedJob.result, shotType.value);
         resultsEl.classList.add("visible");
         analysisReady = true;
         captureCard.classList.add("hidden");
         setCaptureAnalyzingState(false);
+        updateStatusFromJob(completedJob);
         window.requestAnimationFrame(() => {
           resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
         });
       } catch (error) {
         setCaptureAnalyzingState(false);
         captureCard.classList.remove("hidden");
+        showStatus("Issue", friendlyError(error), "error", "clip");
         fileHintEl.textContent = friendlyError(error);
       } finally {
         if (!analysisReady) {
@@ -3593,70 +3891,197 @@
       }
     }
 
-    async function submitAnalysis(file) {
-      const form = new FormData();
-      form.append("file", file, file.name);
-      if (shootingHand.value) {
-        form.append("shooting_hand", shootingHand.value);
-      }
-      if (shotType.value) {
-        form.append("shot_type", shotType.value);
-      }
-      form.append("return_visuals", "true");
-
-      const response = await fetch(`${apiBase}/analyze`, {
-        method: "POST",
-        body: form,
-      });
-
-      if (!response.ok) {
-        let detail = response.statusText;
-        try {
-          const errorJson = await response.json();
-          detail = errorJson.detail || detail;
-        } catch (error) {
-          detail = (await response.text()) || detail;
-        }
-        throw new Error(detail);
-      }
-
-      return response.json();
-    }
-
     function resetFilmRoom() {
       clearCueTimers();
       cancelOverlayLayout();
       hideReplayIntro({ immediate: true });
       hideArchetypeIntro({ immediate: true });
       currentAnalysis = null;
+      currentJobId = null;
       currentPlaybackCues = [];
+      currentPlaybackScript = [];
       currentCueIndex = -1;
       cuePlaybackMode = "idle";
       cueReplayTargetTime = null;
+      cuePlaybackTargetIndex = -1;
+      cuePlaybackArrivalStatus = "";
+      resetCuePlaybackPhaseState();
       cueExplainOpen = false;
       triggeredCueIds = new Set();
       archetypeIntroShown = false;
+      replayMode = "guided";
       lastCueAnchorPoint = null;
       lastCueAnchorPoints = [];
       lastCueProtectedRect = null;
       resultsEl.classList.remove("visible");
-      hideStatusCard();
       overlayLayer.innerHTML = "";
       hideFeedbackConnector();
       replayStatusEl.textContent = "The guided review starts from frame one and eases into each teaching moment.";
       cueRailEl.innerHTML = "";
+      scrubPanelEl.classList.add("hidden");
+      frameScrubberEl.value = 0;
+      cueEvidencePanelEl.classList.add("hidden");
+      cueProofGridEl.innerHTML = "";
+      cueClipCardEl.classList.add("hidden");
+      cueClipVideoEl.removeAttribute("src");
+      cueClipVideoEl.load();
+      cueStripCardEl.classList.add("hidden");
+      cueStripImageEl.removeAttribute("src");
       keyframesEl.innerHTML = `<div class="empty-state">Key frames will appear here after analysis.</div>`;
       phaseCardsEl.innerHTML = "";
       rawIssuesEl.innerHTML = "";
       detailsPanel.open = false;
       annotatedVideo.removeAttribute("src");
       annotatedVideo.load();
+      renderMediaProfile(null);
+      setReplayMode("guided", { silent: true });
       renderCue(null);
       updateReplayButton();
     }
 
+    function getCueScript(index) {
+      const cue = currentPlaybackCues[index];
+      if (!cue) return null;
+      return (currentPlaybackScript || []).find((script) => script.cue_id === cue.id) || null;
+    }
+
+    function resetCuePlaybackPhaseState() {
+      cuePlaybackFreezeConsumed = false;
+      cuePlaybackExitApplied = false;
+    }
+
+    function focusTimeForCue(cue, script) {
+      return Math.max(script?.focus_time ?? cue?.timestamp ?? 0, 0);
+    }
+
+    function exitTimeForCue(cue, script) {
+      const focusTime = focusTimeForCue(cue, script);
+      return Math.max(script?.exit_end ?? focusTime, focusTime);
+    }
+
+    function playbackRateForScriptMoment(script, time) {
+      const safeTime = Math.max(time || 0, 0);
+      if (!script) {
+        return safeTime <= 0 ? introLeadInRate : cuePlaybackRate;
+      }
+
+      if (safeTime >= Math.max(script.focus_end ?? script.focus_time ?? 0, 0)) {
+        return script.exit_rate || 0.82;
+      }
+      if (safeTime >= Math.max(script.focus_start ?? 0, 0)) {
+        return script.focus_rate || cuePlaybackRate;
+      }
+      return script.entry_rate || introLeadInRate;
+    }
+
+    function setReplayMode(mode, { silent = false } = {}) {
+      replayMode = mode;
+      replayModeButtons.forEach((button) => {
+        const isActive = (button.dataset.mode || "guided") === mode;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+      });
+
+      const scrubActive = mode === "scrub";
+      scrubPanelEl.classList.toggle("hidden", !scrubActive);
+
+      if (!silent) {
+        clearCueTimers();
+        cuePlaybackMode = "idle";
+        cueReplayTargetTime = null;
+        cuePlaybackTargetIndex = -1;
+        cuePlaybackArrivalStatus = "";
+        resetCuePlaybackPhaseState();
+      }
+
+      if (mode === "real") {
+        annotatedVideo.playbackRate = 1;
+        replayStatusEl.textContent = "Real-speed replay mode. Use play/pause to feel the natural rhythm.";
+      } else if (mode === "scrub") {
+        annotatedVideo.pause();
+        replayStatusEl.textContent = "Frame scrub mode. Drag the slider to inspect the evidence frame by frame.";
+      } else if (!silent) {
+        annotatedVideo.pause();
+        replayStatusEl.textContent = "Guided mode ready. We will accelerate in and slow down at each teaching moment.";
+      }
+
+      updateReplayButton();
+    }
+
+    function syncScrubberToVideo() {
+      if (scrubPanelEl.classList.contains("hidden")) return;
+      const duration = annotatedVideo.duration || 0;
+      if (!duration) {
+        frameScrubberEl.value = 0;
+        return;
+      }
+      frameScrubberEl.value = Math.round(((annotatedVideo.currentTime || 0) / duration) * 1000);
+    }
+
+    function handleFrameScrub() {
+      if (!annotatedVideo.duration) return;
+      const ratio = Number(frameScrubberEl.value || 0) / 1000;
+      annotatedVideo.pause();
+      annotatedVideo.currentTime = ratio * annotatedVideo.duration;
+    }
+
+    function cueAssetsFor(cueId, key) {
+      return (currentAnalysis?.artifacts?.[key] || []).filter((asset) => asset.cue_id === cueId);
+    }
+
+    function renderCueEvidence(cue) {
+      if (!cue || !currentAnalysis?.artifacts) {
+        cueEvidencePanelEl.classList.add("hidden");
+        cueProofGridEl.innerHTML = "";
+        cueClipCardEl.classList.add("hidden");
+        cueClipVideoEl.removeAttribute("src");
+        cueClipVideoEl.load();
+        cueStripCardEl.classList.add("hidden");
+        cueStripImageEl.removeAttribute("src");
+        return;
+      }
+
+      const stills = cueAssetsFor(cue.id, "cue_still_urls");
+      const strips = cueAssetsFor(cue.id, "frame_strip_urls");
+      const clips = cueAssetsFor(cue.id, "cue_clip_urls");
+      cueEvidenceTitleEl.textContent = `${cue.title} proof pack`;
+      cueEvidenceBadgeEl.textContent = detailTierLabel(currentAnalysis?.media_profile?.detail_tier);
+      cueProofGridEl.innerHTML = stills.length
+        ? stills
+            .map(
+              (asset) => `
+                <article class="proof-card">
+                  <img src="${toApiUrl(asset.url)}" alt="${escapeHtml(asset.label)}" />
+                  <strong>${escapeHtml(asset.label)}</strong>
+                </article>
+              `
+            )
+            .join("")
+        : `<div class="empty-state">Cue proof frames are still being prepared.</div>`;
+
+      if (clips.length) {
+        cueClipCardEl.classList.remove("hidden");
+        cueClipVideoEl.src = toApiUrl(clips[0].url);
+      } else {
+        cueClipCardEl.classList.add("hidden");
+        cueClipVideoEl.removeAttribute("src");
+        cueClipVideoEl.load();
+      }
+
+      if (strips.length) {
+        cueStripCardEl.classList.remove("hidden");
+        cueStripImageEl.src = toApiUrl(strips[0].url);
+      } else {
+        cueStripCardEl.classList.add("hidden");
+        cueStripImageEl.removeAttribute("src");
+      }
+
+      cueEvidencePanelEl.classList.remove("hidden");
+    }
+
     function renderAnalysis(result, selectedShotType) {
       currentAnalysis = result;
+      currentPlaybackScript = [...(result.playback_script || [])];
       currentPlaybackCues = [...(result.playback_cues || [])].sort(
         (a, b) => (a.timestamp || 0) - (b.timestamp || 0)
       );
@@ -3664,6 +4089,7 @@
       triggeredCueIds = new Set();
 
       renderSummary(result.summary, result.comparison, currentPlaybackCues, selectedShotType);
+      renderMediaProfile(result.media_profile || null);
       renderComparisonCard(result.comparison);
       renderStrengthCard(result.strengths || []);
       renderConfidenceCard(result.confidence_notes || []);
@@ -3673,15 +4099,17 @@
       renderPhaseCards(result.phases || []);
       renderRawIssues(result.issues || []);
       renderKeyframes(result.keyframes || []);
+      setReplayMode("guided", { silent: true });
       replayStatusEl.textContent = "Guided review loading. Starting from frame one, then easing into slow motion at your load.";
 
-      if (result.annotated_video_b64) {
+      const replayUrl = toApiUrl(result?.artifacts?.annotated_replay_url || result.annotated_video_b64);
+      if (replayUrl) {
         showReplayIntro({
           kicker: "Guided review",
           title: "Let's dissect your shot",
           text: "Starting from frame one, then easing into slow motion at your load so we do not skip the setup.",
         });
-        annotatedVideo.src = result.annotated_video_b64;
+        annotatedVideo.src = replayUrl;
       } else {
         hideReplayIntro({ immediate: true });
         replayStatusEl.textContent = "The tracked replay was not generated for this clip.";
@@ -3894,6 +4322,7 @@
         lastCueAnchorPoints = [];
         lastCueProtectedRect = null;
         hideFeedbackConnector();
+        renderCueEvidence(null);
         updateCueActions();
         return;
       }
@@ -3920,24 +4349,49 @@
       cueExplainOpen = false;
       feedbackHudEl.style.display = "block";
       restartEntrance(cueBubbleEl, "is-entered");
+      renderCueEvidence(cue);
       renderCueRail();
       updateCueActions();
       requestOverlayLayout(2);
     }
 
     function handleReplayLoaded() {
-      annotatedVideo.playbackRate = cuePlaybackRate;
+      frameScrubberEl.value = 0;
+      annotatedVideo.playbackRate = replayMode === "real" ? 1 : cuePlaybackRate;
       if (!currentPlaybackCues.length) {
         hideReplayIntro();
         updateReplayButton();
         return;
       }
 
-      startGuidedReviewPlayback();
+      if (replayMode === "guided") {
+        startGuidedReviewPlayback();
+      } else {
+        hideReplayIntro({ immediate: true });
+        updateReplayButton();
+      }
     }
 
     function handleReplayCueClick() {
       if (!annotatedVideo.src) return;
+
+      if (replayMode === "real") {
+        if (annotatedVideo.paused) {
+          annotatedVideo.playbackRate = 1;
+          annotatedVideo.play().catch(() => {});
+        } else {
+          annotatedVideo.pause();
+        }
+        updateReplayButton();
+        return;
+      }
+
+      if (replayMode === "scrub") {
+        annotatedVideo.pause();
+        replayStatusEl.textContent = "Frame scrub mode. Drag the slider to inspect the replay.";
+        updateReplayButton();
+        return;
+      }
 
       if (!currentPlaybackCues.length) {
         if (annotatedVideo.paused) {
@@ -3974,16 +4428,20 @@
       cueReplayTargetTime = null;
       cuePlaybackTargetIndex = -1;
       cuePlaybackArrivalStatus = "";
+      resetCuePlaybackPhaseState();
       currentCueIndex = Math.max(0, Math.min(index, currentPlaybackCues.length - 1));
       triggeredCueIds = new Set(
         currentPlaybackCues.slice(0, currentCueIndex + 1).map((cue) => cue.id)
       );
 
       const cue = currentPlaybackCues[currentCueIndex];
+      const script = getCueScript(currentCueIndex);
       renderCue(cue);
       annotatedVideo.pause();
-      annotatedVideo.playbackRate = cuePlaybackRate;
-      const cueTime = exactTime === null ? Math.max(cue.timestamp || 0, 0) : Math.max(exactTime || 0, 0);
+      annotatedVideo.playbackRate = script?.focus_rate || cuePlaybackRate;
+      const cueTime = exactTime === null
+        ? Math.max(script?.focus_time ?? cue.timestamp ?? 0, 0)
+        : Math.max(exactTime || 0, 0);
       seekVideoThen(cueTime, () => {
         annotatedVideo.pause();
         requestOverlayLayout(2);
@@ -4007,20 +4465,86 @@
     }
 
     function monitorCueReplay() {
-      clearCueTimers();
+      if (cueAnimationFrameId) {
+        cancelAnimationFrame(cueAnimationFrameId);
+        cueAnimationFrameId = null;
+      }
+
       const step = () => {
-        if (cuePlaybackMode === "idle") return;
-        if (annotatedVideo.paused || annotatedVideo.seeking || cueReplayTargetTime === null) {
+        cueAnimationFrameId = null;
+        if (cuePlaybackMode === "idle" || cueReplayTargetTime === null) return;
+        if (annotatedVideo.seeking) {
           cueAnimationFrameId = window.requestAnimationFrame(step);
           return;
         }
+        if (annotatedVideo.paused) return;
 
-        if (annotatedVideo.currentTime >= Math.max(cueReplayTargetTime - 0.015, 0)) {
-          const exactTime = cueReplayTargetTime;
-          const targetIndex = cuePlaybackTargetIndex >= 0 ? cuePlaybackTargetIndex : currentCueIndex;
+        const targetIndex = cuePlaybackTargetIndex >= 0 ? cuePlaybackTargetIndex : currentCueIndex;
+        const cue = currentPlaybackCues[targetIndex];
+        const script = getCueScript(targetIndex);
+        const focusTime = focusTimeForCue(cue, script);
+        const focusStart = Math.max(script?.focus_start ?? Math.max(focusTime - 0.12, 0), 0);
+        const focusEnd = Math.max(script?.focus_end ?? focusTime, focusTime);
+        const exitEnd = Math.max(cueReplayTargetTime ?? exitTimeForCue(cue, script), focusTime);
+        const now = annotatedVideo.currentTime || 0;
+        const desiredRate = playbackRateForScriptMoment(script, now);
+
+        if (Math.abs((annotatedVideo.playbackRate || 1) - desiredRate) > 0.01) {
+          annotatedVideo.playbackRate = desiredRate;
+        }
+
+        if (!cuePlaybackFreezeConsumed && now >= focusStart && now < focusEnd) {
+          replayStatusEl.textContent =
+            cuePlaybackMode === "intro"
+              ? "Slow motion into your load."
+              : `Slow motion into feedback ${targetIndex + 1}.`;
+        }
+
+        if (!cuePlaybackFreezeConsumed && script && script.freeze_ms > 0 && now >= focusTime) {
+          cuePlaybackFreezeConsumed = true;
+          annotatedVideo.pause();
+          replayStatusEl.textContent =
+            cuePlaybackMode === "intro"
+              ? "Freeze on the teaching moment."
+              : `Freezing on feedback ${targetIndex + 1}.`;
+
+          seekVideoThen(focusTime, () => {
+            annotatedVideo.pause();
+            requestOverlayLayout(2);
+            cueTimeoutId = window.setTimeout(() => {
+              cueTimeoutId = null;
+              if (cuePlaybackMode === "idle") return;
+
+              annotatedVideo.playbackRate = playbackRateForScriptMoment(
+                script,
+                annotatedVideo.currentTime || focusTime
+              );
+              replayStatusEl.textContent =
+                cuePlaybackMode === "intro"
+                  ? "Holding slow motion through the finish."
+                  : `Holding through feedback ${targetIndex + 1}.`;
+
+              annotatedVideo.play().then(monitorCueReplay).catch(() => {
+                stopCuePlayback(`Playback stopped before feedback ${targetIndex + 1}.`);
+              });
+            }, script.freeze_ms);
+          });
+          return;
+        }
+
+        if (!cuePlaybackExitApplied && now >= focusEnd) {
+          cuePlaybackExitApplied = true;
+          annotatedVideo.playbackRate = script?.exit_rate || desiredRate;
+          replayStatusEl.textContent =
+            cuePlaybackMode === "intro"
+              ? "Accelerating back through the finish."
+              : `Accelerating out of feedback ${targetIndex + 1}.`;
+        }
+
+        if (now >= Math.max(exitEnd - 0.015, 0)) {
           const arrivalStatus = cuePlaybackArrivalStatus || buildCuePauseStatus(targetIndex);
           annotatedVideo.pause();
-          pauseOnCue(targetIndex, { statusMessage: arrivalStatus, exactTime });
+          pauseOnCue(targetIndex, { statusMessage: arrivalStatus, exactTime: focusTime });
           return;
         }
 
@@ -4132,6 +4656,10 @@
         cancelAnimationFrame(cueAnimationFrameId);
         cueAnimationFrameId = null;
       }
+      if (cueTimeoutId) {
+        clearTimeout(cueTimeoutId);
+        cueTimeoutId = null;
+      }
     }
 
     function buildCuePauseStatus(index) {
@@ -4161,6 +4689,7 @@
       cueReplayTargetTime = null;
       cuePlaybackTargetIndex = -1;
       cuePlaybackArrivalStatus = "";
+      resetCuePlaybackPhaseState();
       annotatedVideo.pause();
       replayStatusEl.textContent = statusMessage;
       updateCueActions();
@@ -4174,10 +4703,12 @@
       const safeIndex = Math.max(0, Math.min(targetIndex, currentPlaybackCues.length - 1));
       const cue = currentPlaybackCues[safeIndex];
       if (!cue) return;
-
-      const targetTime = Math.max(cue.timestamp || 0, 0);
-      if (Math.max(startTime || 0, 0) >= Math.max(targetTime - 0.02, 0)) {
-        pauseOnCue(safeIndex, { statusMessage: arrivalStatus, exactTime: targetTime });
+      const script = getCueScript(safeIndex);
+      const focusTime = focusTimeForCue(cue, script);
+      const playbackStart = Math.max(startTime || 0, 0);
+      const targetTime = exitTimeForCue(cue, script);
+      if (playbackStart >= Math.max(targetTime - 0.02, 0)) {
+        pauseOnCue(safeIndex, { statusMessage: arrivalStatus, exactTime: focusTime });
         return;
       }
 
@@ -4187,12 +4718,13 @@
       cueReplayTargetTime = targetTime;
       cuePlaybackTargetIndex = safeIndex;
       cuePlaybackArrivalStatus = arrivalStatus || buildCuePauseStatus(safeIndex);
+      resetCuePlaybackPhaseState();
       replayStatusEl.textContent = startStatus || `Playing to feedback ${safeIndex + 1}.`;
       hideCueOverlayForPlayback();
       updateReplayButton();
       annotatedVideo.pause();
-      annotatedVideo.playbackRate = cuePlaybackRate;
-      seekVideoThen(Math.max(startTime || 0, 0), () => {
+      annotatedVideo.playbackRate = playbackRateForScriptMoment(script, playbackStart);
+      seekVideoThen(playbackStart, () => {
         annotatedVideo.play().then(monitorCueReplay).catch(() => {
           stopCuePlayback(`Playback stopped before feedback ${safeIndex + 1}.`);
         });
@@ -4205,6 +4737,9 @@
         hideArchetypeIntro({ immediate: true });
         updateReplayButton();
         return;
+      }
+      if (replayMode !== "guided") {
+        setReplayMode("guided", { silent: true });
       }
 
       // Show archetype intro first if we have comparison data
@@ -4219,66 +4754,31 @@
     }
 
     function proceedToGuidedReview() {
-      const firstCue = currentPlaybackCues[0];
-      const targetTime = Math.max(firstCue?.timestamp || 0, 0);
-      const loadStartRaw = getPhaseBoundaryStart("load");
-      const loadStart = loadStartRaw === null ? targetTime * 0.42 : loadStartRaw;
-      const slowMoStart = Math.min(
-        Math.max(loadStart, 0),
-        Math.max(targetTime - 0.08, 0)
-      );
+      const firstScript = getCueScript(0);
+      const entryStart = Math.max(firstScript?.entry_start || 0, 0);
 
       clearCueTimers();
       hideCueOverlayForPlayback();
       cuePlaybackMode = "intro";
-      cueReplayTargetTime = targetTime;
+      cueReplayTargetTime = null;
       cuePlaybackTargetIndex = 0;
       cuePlaybackArrivalStatus = "Paused on your first feedback.";
+      resetCuePlaybackPhaseState();
       replayStatusEl.textContent = "Let's dissect your shot.";
 
-      seekVideoThen(0, () => {
+      seekVideoThen(entryStart, () => {
         annotatedVideo.pause();
-        annotatedVideo.playbackRate = introLeadInRate;
-        
-        // 2-second pause before starting the video
+        annotatedVideo.playbackRate = firstScript?.entry_rate || introLeadInRate;
+
         cueTimeoutId = setTimeout(() => {
           if (cuePlaybackMode !== "intro") return;
-          replayStatusEl.textContent = "Starting from frame one, then easing into slow motion at your load.";
-          
-          annotatedVideo.play().then(() => {
-            const step = () => {
-              if (cuePlaybackMode !== "intro") return;
-              if (annotatedVideo.paused || annotatedVideo.seeking || cueReplayTargetTime === null) {
-                cueAnimationFrameId = window.requestAnimationFrame(step);
-                return;
-              }
-
-              const now = annotatedVideo.currentTime || 0;
-              if (now >= slowMoStart && annotatedVideo.playbackRate !== cuePlaybackRate) {
-                annotatedVideo.playbackRate = cuePlaybackRate;
-                replayStatusEl.textContent = "Slow motion into your load.";
-              }
-
-              if (now >= Math.max(cueReplayTargetTime - 0.015, 0)) {
-                const arrivalStatus = cuePlaybackArrivalStatus || "Paused on your first feedback.";
-                annotatedVideo.pause();
-                hideReplayIntro();
-                pauseOnCue(0, {
-                  statusMessage: arrivalStatus,
-                  exactTime: cueReplayTargetTime,
-                });
-                return;
-              }
-
-            cueAnimationFrameId = window.requestAnimationFrame(step);
-          };
-
-          cueAnimationFrameId = window.requestAnimationFrame(step);
-        }).catch(() => {
-          hideReplayIntro();
-          focusCue(0, { statusMessage: "Paused on your first feedback." });
-        });
-        }, 2000); // 2-second pause before starting
+          startCuePlayback(0, {
+            mode: "intro",
+            startTime: entryStart,
+            startStatus: "Starting from frame one, then easing into slow motion at your load.",
+            arrivalStatus: "Paused on your first feedback.",
+          });
+        }, 2000);
       });
       updateReplayButton();
     }
@@ -4286,6 +4786,16 @@
     function updateReplayButton() {
       if (!annotatedVideo.src) {
         playTourBtn.textContent = "Replay feedback";
+        return;
+      }
+
+      if (replayMode === "real") {
+        playTourBtn.textContent = annotatedVideo.paused ? "Play replay" : "Pause replay";
+        return;
+      }
+
+      if (replayMode === "scrub") {
+        playTourBtn.textContent = "Scrub replay";
         return;
       }
 
@@ -4997,7 +5507,7 @@
         .map(
           (frame) => `
             <article class="keyframe-card">
-              <img src="${frame.image_b64}" alt="${escapeHtml(formatPhase(frame.phase))}" />
+              <img src="${toApiUrl(frame.image_url || frame.image_b64 || "")}" alt="${escapeHtml(formatPhase(frame.phase))}" />
               <div class="keyframe-info">
                 <div class="keyframe-title">${escapeHtml(formatPhase(frame.phase))}</div>
                 <div class="empty-copy">${escapeHtml(phaseDescriptions[frame.phase] || "")}</div>

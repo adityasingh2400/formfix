@@ -8,7 +8,7 @@ import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import cv2
 import mediapipe as mp
@@ -16,7 +16,14 @@ import numpy as np
 
 from .. import schemas
 from . import comparison, research_bank
-from .video_utils import decode_video
+from .video_utils import (
+    coarse_target_fps_for_profile,
+    decode_video,
+    decode_video_path,
+    dense_target_fps_for_profile,
+    effective_sample_fps,
+    extract_subclip,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -2269,18 +2276,46 @@ def _draw_skeleton_on_frame(
     return frame
 
 
-def _encode_overlay_video(
+def _issue_lookup_by_phase(issues: List[schemas.Issue]) -> Dict[str, List[schemas.Issue]]:
+    issue_by_phase: Dict[str, List[schemas.Issue]] = {}
+    for issue in issues:
+        if issue.phase:
+            issue_by_phase.setdefault(issue.phase, []).append(issue)
+    return issue_by_phase
+
+
+def _annotated_frame_with_context(
+    frame: np.ndarray,
+    metric: FrameMetrics,
+    label: str,
+    issues_by_phase: Dict[str, List[schemas.Issue]],
+    *,
+    rotate_output: bool,
+) -> np.ndarray:
+    annotated = _draw_skeleton_on_frame(
+        frame.copy(),
+        metric,
+        label,
+        issues_by_phase.get(label, []),
+        show_phase_label=True,
+    )
+    if rotate_output:
+        annotated = cv2.rotate(annotated, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return annotated
+
+
+def _encode_overlay_video_file(
     frames: List[np.ndarray],
     metrics: List[FrameMetrics],
     labels: List[str],
     issues: List[schemas.Issue],
     fps: float,
-) -> Optional[str]:
-    """Encode an MP4 video with skeleton overlays on every frame. Returns base64 data URL or None."""
-    import tempfile
+    output_path: Path,
+) -> Optional[Path]:
     import os
-    import subprocess
     import shutil
+    import subprocess
+    import tempfile
 
     if not frames:
         return None
@@ -2289,77 +2324,97 @@ def _encode_overlay_video(
     sample_frame = frames[0]
     if rotate_output:
         sample_frame = cv2.rotate(sample_frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    h, w = sample_frame.shape[:2]
+    height, width = sample_frame.shape[:2]
+    issues_by_phase = _issue_lookup_by_phase(issues)
 
-    # Build issue lookup by phase
-    issue_by_phase: Dict[str, List[schemas.Issue]] = {}
-    for iss in issues:
-        if iss.phase:
-            issue_by_phase.setdefault(iss.phase, []).append(iss)
-
-    # First write with OpenCV (mp4v), then re-encode with ffmpeg for browser compatibility
     tmp_raw = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
     tmp_raw.close()
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(tmp_raw.name, fourcc, fps, (w, h))
+    out = cv2.VideoWriter(tmp_raw.name, fourcc, max(fps, 12.0), (width, height))
 
-    for i, frame in enumerate(frames):
-        annotated = frame.copy()
-        if i < len(metrics):
-            m = metrics[i]
-            phase = labels[i] if i < len(labels) else "unknown"
-            phase_issues = issue_by_phase.get(phase, [])
-            annotated = _draw_skeleton_on_frame(annotated, m, phase, phase_issues, show_phase_label=True)
-        if rotate_output:
-            annotated = cv2.rotate(annotated, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    for idx, frame in enumerate(frames):
+        if idx < len(metrics):
+            annotated = _annotated_frame_with_context(
+                frame,
+                metrics[idx],
+                labels[idx] if idx < len(labels) else "unknown",
+                issues_by_phase,
+                rotate_output=rotate_output,
+            )
+        else:
+            annotated = frame.copy()
+            if rotate_output:
+                annotated = cv2.rotate(annotated, cv2.ROTATE_90_COUNTERCLOCKWISE)
         out.write(annotated)
-
     out.release()
 
-    # Re-encode to H.264 with ffmpeg for browser compatibility
-    tmp_h264 = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-    tmp_h264.close()
-
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     ffmpeg_path = shutil.which("ffmpeg")
-    if ffmpeg_path:
-        try:
-            subprocess.run(
-                [
-                    ffmpeg_path,
-                    "-y",
-                    "-i", tmp_raw.name,
-                    "-c:v", "libx264",
-                    "-preset", "ultrafast",
-                    "-crf", "28",
-                    "-pix_fmt", "yuv420p",
-                    "-movflags", "+faststart",
-                    tmp_h264.name,
-                ],
-                check=True,
-                capture_output=True,
-            )
-            output_path = tmp_h264.name
-        except subprocess.CalledProcessError:
-            # ffmpeg failed, fall back to raw mp4v
-            output_path = tmp_raw.name
-    else:
-        # No ffmpeg, use raw (may not play in browser)
-        output_path = tmp_raw.name
+    if not ffmpeg_path:
+        shutil.move(tmp_raw.name, output_path)
+        return output_path
 
-    # Read back and encode
-    with open(output_path, "rb") as f:
-        video_bytes = f.read()
-
-    # Cleanup
+    completed = subprocess.run(
+        [
+            ffmpeg_path,
+            "-y",
+            "-i",
+            tmp_raw.name,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "26",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     try:
         os.unlink(tmp_raw.name)
     except OSError:
         pass
-    try:
-        os.unlink(tmp_h264.name)
-    except OSError:
-        pass
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"Overlay encode failed: {completed.stderr.strip() or completed.stdout.strip()}"
+        )
+    return output_path
 
+
+def _encode_overlay_video(
+    frames: List[np.ndarray],
+    metrics: List[FrameMetrics],
+    labels: List[str],
+    issues: List[schemas.Issue],
+    fps: float,
+) -> Optional[str]:
+    """Encode an MP4 video with skeleton overlays on every frame. Returns base64 data URL or None."""
+    import os
+    import tempfile
+
+    if not frames:
+        return None
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="formfix-overlay-"))
+    output_path = tmp_dir / "annotated.mp4"
+    _encode_overlay_video_file(frames, metrics, labels, issues, fps, output_path)
+    try:
+        video_bytes = output_path.read_bytes()
+    finally:
+        try:
+            os.unlink(output_path)
+        except OSError:
+            pass
+        try:
+            os.rmdir(tmp_dir)
+        except OSError:
+            pass
     b64 = base64.b64encode(video_bytes).decode("ascii")
     return f"data:video/mp4;base64,{b64}"
 
@@ -2516,6 +2571,144 @@ def _keyframe_images(
     return keyframes
 
 
+def _write_png(path: Path, frame: np.ndarray) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ok, buffer = cv2.imencode(".png", frame)
+    if not ok:
+        raise RuntimeError(f"Could not encode PNG for {path.name}")
+    path.write_bytes(buffer.tobytes())
+    return path
+
+
+def _write_keyframe_images(
+    frames: List[np.ndarray],
+    metrics: List[FrameMetrics],
+    labels: List[str],
+    issues: List[schemas.Issue],
+    output_dir: Path,
+    url_builder: Callable[[Path], str],
+    *,
+    include_base64: bool = False,
+) -> List[schemas.KeyframePreview]:
+    previews = _keyframe_images(frames, metrics, labels, issues)
+    written: List[schemas.KeyframePreview] = []
+    for preview in previews:
+        if not preview.image_b64:
+            continue
+        _, encoded = preview.image_b64.split(",", 1)
+        image_path = output_dir / f"{preview.phase}.png"
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        image_path.write_bytes(base64.b64decode(encoded))
+        written.append(
+            schemas.KeyframePreview(
+                phase=preview.phase,
+                image_b64=preview.image_b64 if include_base64 else None,
+                image_url=url_builder(image_path),
+            )
+        )
+    return written
+
+
+def _render_cue_artifacts(
+    frames: List[np.ndarray],
+    metrics: List[FrameMetrics],
+    labels: List[str],
+    issues: List[schemas.Issue],
+    playback_cues: List[schemas.PlaybackCue],
+    render_fps: float,
+    artifact_dir: Path,
+    url_builder: Callable[[Path], str],
+) -> tuple[List[schemas.CueArtifact], List[schemas.CueArtifact], List[schemas.CueArtifact]]:
+    if not frames or not metrics or not playback_cues:
+        return [], [], []
+
+    rotate_output = frames[0].shape[1] > frames[0].shape[0]
+    issues_by_phase = _issue_lookup_by_phase(issues)
+    cue_clip_assets: List[schemas.CueArtifact] = []
+    cue_still_assets: List[schemas.CueArtifact] = []
+    frame_strip_assets: List[schemas.CueArtifact] = []
+    still_dir = artifact_dir / "cue-stills"
+    clip_dir = artifact_dir / "cue-clips"
+    strip_dir = artifact_dir / "frame-strips"
+    strip_dir.mkdir(parents=True, exist_ok=True)
+
+    for cue in playback_cues:
+        metric_index = min(
+            range(len(metrics)),
+            key=lambda idx: abs(metrics[idx].timestamp_s - cue.timestamp),
+        )
+
+        focus_indices = [
+            max(metric_index - 1, 0),
+            metric_index,
+            min(metric_index + 1, len(metrics) - 1),
+        ]
+        for label_name, frame_index in zip(["before", "focus", "after"], focus_indices):
+            annotated = _annotated_frame_with_context(
+                frames[frame_index],
+                metrics[frame_index],
+                labels[frame_index] if frame_index < len(labels) else "unknown",
+                issues_by_phase,
+                rotate_output=rotate_output,
+            )
+            cv2.putText(
+                annotated,
+                label_name.upper(),
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            still_path = still_dir / f"{cue.id}-{label_name}.png"
+            _write_png(still_path, annotated)
+            cue_still_assets.append(
+                schemas.CueArtifact(cue_id=cue.id, label=label_name, url=url_builder(still_path))
+            )
+
+        strip_indices = [
+            min(max(metric_index + offset, 0), len(metrics) - 1)
+            for offset in [-2, -1, 0, 1, 2]
+        ]
+        strip_frames = []
+        for frame_index in strip_indices:
+            annotated = _annotated_frame_with_context(
+                frames[frame_index],
+                metrics[frame_index],
+                labels[frame_index] if frame_index < len(labels) else "unknown",
+                issues_by_phase,
+                rotate_output=rotate_output,
+            )
+            strip_frames.append(cv2.resize(annotated, (220, 124), interpolation=cv2.INTER_AREA))
+        strip_image = cv2.hconcat(strip_frames)
+        strip_path = strip_dir / f"{cue.id}-strip.png"
+        _write_png(strip_path, strip_image)
+        frame_strip_assets.append(
+            schemas.CueArtifact(cue_id=cue.id, label="strip", url=url_builder(strip_path))
+        )
+
+        clip_start = max(metric_index - 4, 0)
+        clip_end = min(metric_index + 4, len(metrics) - 1)
+        clip_frames = frames[clip_start : clip_end + 1]
+        clip_metrics = metrics[clip_start : clip_end + 1]
+        clip_labels = labels[clip_start : clip_end + 1]
+        clip_path = clip_dir / f"{cue.id}.mp4"
+        _encode_overlay_video_file(
+            clip_frames,
+            clip_metrics,
+            clip_labels,
+            issues,
+            render_fps,
+            clip_path,
+        )
+        cue_clip_assets.append(
+            schemas.CueArtifact(cue_id=cue.id, label="micro_clip", url=url_builder(clip_path))
+        )
+
+    return cue_clip_assets, cue_still_assets, frame_strip_assets
+
+
 def _boundaries_from_indices(metrics: List[FrameMetrics], boundaries: dict, min_dt: float) -> List[schemas.PhaseBoundary]:
     indices = [
         ("load", 0, boundaries["load_idx"]),
@@ -2565,6 +2758,40 @@ def _build_confidence_notes(
     return confidence_notes
 
 
+def _prepare_analysis_from_decoded(
+    frames: List[np.ndarray],
+    fps: float,
+    stride: int,
+    *,
+    shooting_hand: str | None = None,
+) -> PreparedAnalysis:
+    if not frames:
+        raise ValueError("Could not decode video or video empty.")
+
+    normalized_hand = _normalize_shooting_side(shooting_hand)
+    metrics = _extract_pose_metrics(frames, fps, stride, shooting_hand=normalized_hand)
+    if len(metrics) < 3:
+        raise ValueError("Insufficient pose detections; recapture with clearer framing.")
+
+    phases, boundaries, min_dt = _segment_phases(metrics)
+    labels = _label_frames(metrics, boundaries)
+    issues = _issues_from_metrics(metrics, phases, boundaries)
+    confidence_notes = _build_confidence_notes(metrics, frames, shooting_hand=normalized_hand)
+
+    return PreparedAnalysis(
+        frames=frames,
+        fps=fps,
+        stride=stride,
+        metrics=metrics,
+        phases=phases,
+        boundaries=boundaries,
+        min_dt=min_dt,
+        labels=labels,
+        issues=issues,
+        confidence_notes=confidence_notes,
+    )
+
+
 def _prepare_analysis(
     file_bytes: bytes,
     shot_type: str | None = None,
@@ -2577,31 +2804,284 @@ def _prepare_analysis(
         return cached
 
     frames, fps, stride = decode_video(file_bytes, sample_every_n=2)
-    if not frames:
-        raise ValueError("Could not decode video or video empty.")
-
-    metrics = _extract_pose_metrics(frames, fps, stride, shooting_hand=normalized_hand)
-    if len(metrics) < 3:
-        raise ValueError("Insufficient pose detections; recapture with clearer framing.")
-
-    phases, boundaries, min_dt = _segment_phases(metrics)
-    labels = _label_frames(metrics, boundaries)
-    issues = _issues_from_metrics(metrics, phases, boundaries)
-    confidence_notes = _build_confidence_notes(metrics, frames, shooting_hand=normalized_hand)
-
-    prepared = PreparedAnalysis(
-        frames=frames,
-        fps=fps,
-        stride=stride,
-        metrics=metrics,
-        phases=phases,
-        boundaries=boundaries,
-        min_dt=min_dt,
-        labels=labels,
-        issues=issues,
-        confidence_notes=confidence_notes,
+    prepared = _prepare_analysis_from_decoded(
+        frames,
+        fps,
+        stride,
+        shooting_hand=normalized_hand,
     )
     return _store_cached_prepared(cache_key, prepared)
+
+
+def _phase_seed_times(prepared: PreparedAnalysis) -> Dict[str, float]:
+    metrics = prepared.metrics
+    boundaries = prepared.boundaries
+    return {
+        "load": metrics[max(0, min(boundaries.get("load_idx", 0), len(metrics) - 1))].timestamp_s,
+        "release": metrics[max(0, min(boundaries.get("release_idx", 0), len(metrics) - 1))].timestamp_s,
+        "follow_through": metrics[max(0, min(boundaries.get("follow_idx", len(metrics) - 1), len(metrics) - 1))].timestamp_s,
+    }
+
+
+def _refine_phase_timestamps(
+    dense_video_path: str | Path | None,
+    prepared: PreparedAnalysis,
+    *,
+    shooting_hand: str | None,
+    media_profile: Optional[schemas.MediaProfile],
+) -> tuple[Dict[str, float], bool]:
+    if dense_video_path is None or media_profile is None:
+        return {}, False
+    if media_profile.detail_tier not in {"ultra_detail", "high_detail"}:
+        return {}, False
+
+    dense_target_fps = dense_target_fps_for_profile(media_profile)
+    seed_times = _phase_seed_times(prepared)
+    windows = {
+        "load": (max(seed_times["load"] - 0.45, 0.0), 0.9),
+        "release": (max(seed_times["release"] - 0.35, 0.0), 0.7),
+        "follow_through": (max(seed_times["release"] - 0.1, 0.0), 0.8),
+    }
+    refined: Dict[str, float] = {}
+    used = False
+
+    for phase, (start_s, duration_s) in windows.items():
+        frames, fps, stride = decode_video_path(
+            dense_video_path,
+            target_fps=dense_target_fps,
+            start_s=start_s,
+            duration_s=duration_s,
+            max_dimension=1440,
+        )
+        if len(frames) < 4:
+            continue
+        try:
+            dense_prepared = _prepare_analysis_from_decoded(
+                frames,
+                fps,
+                stride,
+                shooting_hand=shooting_hand,
+            )
+        except ValueError:
+            continue
+
+        dense_metrics = dense_prepared.metrics
+        if not dense_metrics:
+            continue
+
+        if phase == "load":
+            best_metric = min(dense_metrics, key=lambda metric: metric.knee_angle)
+        elif phase == "release":
+            velocity_candidates = [
+                metric for metric in dense_metrics if metric.wrist_flexion_vel is not None
+            ]
+            best_metric = (
+                max(velocity_candidates, key=lambda metric: metric.wrist_flexion_vel or -1e9)
+                if velocity_candidates
+                else max(dense_metrics, key=lambda metric: metric.wrist_height)
+            )
+        else:
+            release_index = max(0, min(dense_prepared.boundaries.get("release_idx", 0), len(dense_metrics) - 1))
+            follow_candidates = dense_metrics[release_index:] or dense_metrics
+            best_metric = max(
+                follow_candidates,
+                key=lambda metric: (
+                    metric.wrist_flexion if metric.wrist_flexion is not None else -1e9,
+                    metric.timestamp_s,
+                ),
+            )
+
+        refined[phase] = start_s + max(best_metric.timestamp_s, 0.0)
+        used = True
+
+    return refined, used
+
+
+def _apply_refined_cue_timestamps(
+    playback_cues: List[schemas.PlaybackCue],
+    refined_times: Dict[str, float],
+) -> List[schemas.PlaybackCue]:
+    updated: List[schemas.PlaybackCue] = []
+    for cue in playback_cues:
+        if cue.phase and cue.phase in refined_times:
+            updated.append(cue.model_copy(update={"timestamp": refined_times[cue.phase]}))
+        else:
+            updated.append(cue)
+    return updated
+
+
+def _build_playback_script(
+    playback_cues: List[schemas.PlaybackCue],
+    phase_boundaries: List[schemas.PhaseBoundary],
+    media_profile: Optional[schemas.MediaProfile],
+) -> List[schemas.PlaybackScriptCue]:
+    if not playback_cues:
+        return []
+
+    duration_s = media_profile.duration_s if media_profile is not None else 0.0
+    detail_tier = media_profile.detail_tier if media_profile is not None else "standard_detail"
+    focus_rate = 0.28 if detail_tier == "ultra_detail" else 0.4 if detail_tier == "high_detail" else 0.58
+    freeze_ms = 1100 if detail_tier == "ultra_detail" else 850 if detail_tier == "high_detail" else 650
+    phase_start_lookup = {boundary.phase: boundary.start for boundary in phase_boundaries}
+
+    script: List[schemas.PlaybackScriptCue] = []
+    for cue in playback_cues:
+        focus_time = max(cue.timestamp, 0.0)
+        phase_start = phase_start_lookup.get(cue.phase or "", max(focus_time - 0.45, 0.0))
+        entry_start = max(min(phase_start, focus_time - 0.24), 0.0)
+        focus_start = max(focus_time - 0.16, entry_start)
+        focus_end = focus_time + 0.12
+        exit_end = focus_time + 0.68
+        if duration_s > 0:
+            focus_end = min(focus_end, duration_s)
+            exit_end = min(exit_end, duration_s)
+        script.append(
+            schemas.PlaybackScriptCue(
+                cue_id=cue.id,
+                entry_start=entry_start,
+                focus_start=focus_start,
+                focus_time=focus_time,
+                focus_end=max(focus_end, focus_time),
+                exit_end=max(exit_end, focus_time),
+                entry_rate=1.0,
+                focus_rate=focus_rate,
+                exit_rate=0.82,
+                freeze_ms=freeze_ms,
+            )
+        )
+    return script
+
+
+def analyze_video_paths(
+    *,
+    coarse_video_path: str | Path,
+    dense_video_path: str | Path | None = None,
+    shot_type: str | None = None,
+    shooting_hand: str | None = None,
+    media_profile: Optional[schemas.MediaProfile] = None,
+    artifact_dir: Optional[Path] = None,
+    url_builder: Optional[Callable[[Path], str]] = None,
+    normalized_source_url: Optional[str] = None,
+    return_visuals: bool = True,
+    include_legacy_base64: bool = False,
+    progress_hook: Optional[Callable[[str, str], None]] = None,
+) -> schemas.AnalysisResult:
+    frames, fps, stride = decode_video_path(
+        coarse_video_path,
+        target_fps=coarse_target_fps_for_profile(media_profile),
+    )
+    prepared = _prepare_analysis_from_decoded(
+        frames,
+        fps,
+        stride,
+        shooting_hand=shooting_hand,
+    )
+    metrics = prepared.metrics
+    phases = prepared.phases
+    boundaries = prepared.boundaries
+    min_dt = prepared.min_dt
+    labels = prepared.labels
+    issues = prepared.issues
+    confidence_notes = prepared.confidence_notes
+
+    comparison_result = comparison.build_comparison(phases, shot_type=shot_type)
+    coaching_plan = _build_coaching_plan(issues, comparison_result=comparison_result)
+    strengths = _build_strengths(metrics, phases, issues)
+    research_notes = _build_research_notes(issues)
+    summary = _build_summary(
+        metrics,
+        issues,
+        coaching_plan,
+        confidence_notes,
+        comparison_result=comparison_result,
+    )
+    playback_cues = _build_playback_cues(
+        metrics,
+        boundaries,
+        issues,
+        frames,
+        comparison_result=comparison_result,
+    )
+    phase_boundaries = _boundaries_from_indices(metrics, boundaries, min_dt)
+
+    if progress_hook:
+        progress_hook("dense_refine", "Refining the timing windows around load, release, and follow-through.")
+    refined_times, refinement_used = _refine_phase_timestamps(
+        dense_video_path,
+        prepared,
+        shooting_hand=shooting_hand,
+        media_profile=media_profile,
+    )
+    playback_cues = _apply_refined_cue_timestamps(playback_cues, refined_times)
+    playback_script = _build_playback_script(playback_cues, phase_boundaries, media_profile)
+
+    resolved_media_profile = (
+        media_profile.model_copy(update={"dense_refinement_used": refinement_used})
+        if media_profile is not None
+        else None
+    )
+
+    annotated_video_b64 = None
+    artifacts = schemas.EvidenceArtifacts(normalized_source_url=normalized_source_url)
+    keyframes: List[schemas.KeyframePreview] = []
+
+    if return_visuals:
+        pose_frames = [frames[m.frame_index] for m in metrics if m.frame_index < len(frames)]
+        render_fps = effective_sample_fps(fps, stride) or 24.0
+        if progress_hook:
+            progress_hook("rendering", "Rendering the replay, cue clips, proof frames, and frame strips.")
+
+        if artifact_dir is not None and url_builder is not None:
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            annotated_path = artifact_dir / "annotated-replay.mp4"
+            _encode_overlay_video_file(pose_frames, metrics, labels, issues, render_fps, annotated_path)
+            artifacts.annotated_replay_url = url_builder(annotated_path)
+            keyframes = _write_keyframe_images(
+                pose_frames,
+                metrics,
+                labels,
+                issues,
+                artifact_dir / "keyframes",
+                url_builder,
+                include_base64=include_legacy_base64,
+            )
+            cue_clip_urls, cue_still_urls, frame_strip_urls = _render_cue_artifacts(
+                pose_frames,
+                metrics,
+                labels,
+                issues,
+                playback_cues,
+                render_fps,
+                artifact_dir,
+                url_builder,
+            )
+            artifacts.cue_clip_urls = cue_clip_urls
+            artifacts.cue_still_urls = cue_still_urls
+            artifacts.frame_strip_urls = frame_strip_urls
+
+        if include_legacy_base64:
+            annotated_video_b64 = _encode_overlay_video(pose_frames, metrics, labels, issues, render_fps)
+            if not keyframes:
+                keyframes = _keyframe_images(pose_frames, metrics, labels, issues)
+
+    return schemas.AnalysisResult(
+        phases=phases,
+        issues=issues,
+        summary=summary,
+        coaching_plan=coaching_plan,
+        strengths=strengths,
+        research_notes=research_notes,
+        comparison=comparison_result,
+        playback_cues=playback_cues,
+        playback_script=playback_script,
+        confidence_notes=confidence_notes,
+        media_profile=resolved_media_profile,
+        artifacts=artifacts,
+        annotated_video_b64=annotated_video_b64,
+        keyframes=keyframes,
+        phase_boundaries=phase_boundaries,
+        processing_mode="deep" if return_visuals else "quick",
+    )
 
 
 def analyze_video(
@@ -2644,6 +3124,11 @@ def analyze_video(
         frames,
         comparison_result=comparison_result,
     )
+    playback_script = _build_playback_script(
+        playback_cues,
+        _boundaries_from_indices(metrics, boundaries, min_dt),
+        None,
+    )
     annotated_video_b64 = None
     keyframes: List[schemas.KeyframePreview] = []
     phase_boundaries: List[schemas.PhaseBoundary] = _boundaries_from_indices(metrics, boundaries, min_dt)
@@ -2663,6 +3148,7 @@ def analyze_video(
         research_notes=research_notes,
         comparison=comparison_result,
         playback_cues=playback_cues,
+        playback_script=playback_script,
         confidence_notes=confidence_notes,
         annotated_video_b64=annotated_video_b64,
         keyframes=keyframes,

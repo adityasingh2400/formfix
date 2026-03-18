@@ -32,11 +32,11 @@ The shot is segmented into **Load → Set → Rise → Release → Follow-throug
 ### 🎨 Style Comparison
 Your shot is matched against an **archetype library**. See which style family you're closest to, what traits you already share, and what to borrow next.
 
-### 🎬 Tracked Replay
-Skeleton overlay, key frames, and timing breakdown — all rendered after the quick pass so you can study the details.
+### 🎬 Slow-Mo Evidence Replay
+Native slow-motion uploads are preferred. FormFix preserves the master clip, renders a guided replay, and builds cue clips, proof frames, and frame strips so the feedback feels earned.
 
-### 📱 In-Browser Recording
-No app install needed. Record directly from your phone or laptop camera on supported browsers.
+### 📱 Native Slow-Mo First
+The ideal upload is the original `4K 240 fps` or `1080p 120/240 fps` clip from your phone. In-browser recording still works, but it is treated as a fallback path.
 
 ---
 
@@ -134,20 +134,51 @@ formfix/
 └─────────────┘     └─────────────┘     └─────────────┘
 ```
 
-1. **Video Upload** — Frames extracted at 15fps
-2. **Pose Estimation** — MediaPipe Holistic (body + hands)
-3. **Phase Detection** — Heuristic segmentation via knee angle, wrist height, wrist velocity
-4. **Quick Coaching** — Strongest findings → plain-language cues
-5. **Style Match** — Compare against nearest archetype family
-6. **Deep Breakdown** — Tracked replay, key frames, technical readout
+1. **Video Upload** — Native slow-motion is preferred; `4K 240 fps` is the gold-standard capture
+2. **Media Inspection** — `ffprobe` classifies frame density, resolution, and capture tier
+3. **Coarse Scan** — A reduced rendition locates the shot rhythm and likely cue windows
+4. **Dense Refinement** — High-detail windows sharpen load, release, and follow-through timing
+5. **Style Match + Coaching** — Strongest findings turn into plain-language cues
+6. **Evidence Pack** — Guided replay, cue clips, proof frames, and frame strips are rendered as URL-based artifacts
 
 ---
 
 ## 📡 API
 
+### `POST /analysis-jobs`
+
+Queue an async analysis job.
+
+**Request:**
+```
+Content-Type: multipart/form-data
+
+file: video file (.mp4, .mov, .webm, etc.)
+shot_type: optional — "free_throw" | "spot_up" | "pull_up"
+shooting_hand: optional — "left" | "right"
+```
+
+**Response:**
+```json
+{
+  "job_id": "uuid",
+  "status": "queued",
+  "stage": "queued",
+  "progress_message": "Clip uploaded. Checking whether this is a high-detail slow-motion read.",
+  "media_profile": {
+    "fps": 240.0,
+    "detail_tier": "ultra_detail"
+  }
+}
+```
+
+### `GET /analysis-jobs/{job_id}`
+
+Poll for status and fetch the final URL-based result payload.
+
 ### `POST /analyze`
 
-Upload a video and get analysis results.
+Blocking compatibility wrapper for quick local testing.
 
 **Request:**
 ```
@@ -155,7 +186,7 @@ Content-Type: multipart/form-data
 
 file: video file (.mp4, .mov, etc.)
 shot_type: optional — "free_throw" | "spot_up" | "pull_up"
-return_visuals: "true" to include annotated video + keyframes
+return_visuals: "true" to include replay assets
 ```
 
 **Response:**
@@ -173,8 +204,14 @@ return_visuals: "true" to include annotated video + keyframes
       "aligned_traits": [...],
       "borrow_next": [...]
     },
-    "keyframes": [...],
-    "annotated_video_b64": "data:video/mp4;base64,..."
+    "media_profile": {...},
+    "artifacts": {
+      "annotated_replay_url": "/media/jobs/<id>/artifacts/annotated-replay.mp4",
+      "cue_clip_urls": [...],
+      "cue_still_urls": [...],
+      "frame_strip_urls": [...]
+    },
+    "playback_script": [...]
   }
 }
 ```
